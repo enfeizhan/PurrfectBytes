@@ -1,9 +1,9 @@
 # PurrfectBytes
 
 <div align="center">
-  <img src="ChatGPT Image Aug 30, 2025, 06_50_32 PM.png" alt="PurrfectBytes Logo" width="200"/>
-  <br/>
-  <img src="ChatGPT Image Aug 30, 2025, 07_28_15 PM.png" alt="PurrfectBytes Banner" width="400"/>
+  <img src="ChatGPT Image Aug 30, 2025, 06_50_32 PM.png" alt="PurrfectBytes Logo" width="180"/>
+  &nbsp;&nbsp;&nbsp;
+  <img src="ChatGPT Image Aug 30, 2025, 07_28_15 PM.png" alt="PurrfectBytes Banner" width="300"/>
 </div>
 
 ## 🎵 Text-to-Speech & Video Generation Platform
