@@ -229,6 +229,15 @@
                 <label for="slow">Slow speech speed</label>
             </div>
             
+            <div class="form-group">
+                <label for="repetitions">Number of Repetitions (Concatenation):</label>
+                <input type="number" id="repetitions" name="repetitions" min="1" max="100" value="10" 
+                       style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;">
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Generate and concatenate the text this many times (1 = no concatenation)
+                </small>
+            </div>
+            
             <div style="display: flex; gap: 10px;">
                 <button type="submit" id="audioBtn" style="flex: 1;">
                     <span class="button-text">Convert to Audio</span>
@@ -331,9 +340,19 @@
             videoBtn.disabled = true;
             
             const formData = new FormData(form);
+            const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
+            
+            // If repetitions > 1, use repeat endpoints
+            let actualEndpoint = endpoint;
+            
+            if (repetitions > 1) {
+                // Use the new repeat endpoints
+                actualEndpoint = isVideo ? '/repeat-video' : '/repeat-audio';
+                formData.append('repetitions', repetitions);
+            }
             
             try {
-                const response = await fetch(endpoint, {
+                const response = await fetch(actualEndpoint, {
                     method: 'POST',
                     body: formData
                 });
@@ -343,29 +362,40 @@
                 if (data.success) {
                     resultDiv.className = 'result success show';
                     if (isVideo) {
+                        const videoUrl = data.video_url || data.download_url;
+                        const audioUrl = data.audio_url;
+                        const isRepeat = repetitions > 1;
+                        
                         resultDiv.innerHTML = `
-                            <h3>🎬 Video Generated Successfully!</h3>
+                            <h3>🎬 Video Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
+                            ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
+                            ${data.duration ? `<p style="color: #666; margin: 5px 0;">Total duration: ${data.duration.toFixed(2)} seconds</p>` : ''}
                             <video controls style="width: 100%; margin-top: 15px;">
-                                <source src="${data.video_url}" type="video/mp4">
+                                <source src="${videoUrl}" type="video/mp4">
                                 Your browser does not support the video element.
                             </video>
                             <div style="display: flex; gap: 10px; margin-top: 15px;">
-                                <a href="${data.video_url}" download class="download-btn" style="flex: 1;">
+                                <a href="${videoUrl}" download class="download-btn" style="flex: 1;">
                                     📥 Download Video
                                 </a>
-                                <a href="${data.audio_url}" download class="download-btn" style="flex: 1; background: #6c757d;">
+                                ${audioUrl ? `<a href="${audioUrl}" download class="download-btn" style="flex: 1; background: #6c757d;">
                                     🎵 Download Audio Only
-                                </a>
+                                </a>` : ''}
                             </div>
                         `;
                     } else {
+                        const audioUrl = data.download_url;
+                        const isRepeat = repetitions > 1;
+                        
                         resultDiv.innerHTML = `
-                            <h3>✅ Audio Generated Successfully!</h3>
+                            <h3>✅ Audio Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
+                            ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
+                            ${data.duration ? `<p style="color: #666; margin: 5px 0;">Total duration: ${data.duration.toFixed(2)} seconds</p>` : ''}
                             <audio controls>
-                                <source src="${data.download_url}" type="audio/mpeg">
+                                <source src="${audioUrl}" type="audio/mpeg">
                                 Your browser does not support the audio element.
                             </audio>
-                            <a href="${data.download_url}" download class="download-btn">
+                            <a href="${audioUrl}" download class="download-btn">
                                 📥 Download Audio
                             </a>
                         `;

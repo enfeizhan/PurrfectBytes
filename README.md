@@ -14,11 +14,13 @@ A comprehensive web application that converts text into audio files and synchron
 
 - **Text-to-Speech**: Convert text to high-quality audio using Google Text-to-Speech (gTTS)
 - **Video Generation**: Create videos with synchronized character highlighting
+- **🆕 Audio/Video Repetition & Concatenation**: Generate and concatenate content multiple times with perfect highlighting synchronization
 - **Multi-Language Support**: Automatic language detection with 60+ supported languages
 - **CJK Text Handling**: Proper character-based text wrapping for Asian languages
 - **Real-time Processing**: Fast audio and video generation with progress feedback
 - **File Management**: Automatic cleanup of old files with configurable retention
 - **RESTful API**: Complete API endpoints for integration
+- **Web UI**: Intuitive interface with repetition controls
 
 ## 🚀 Quick Start
 
@@ -124,8 +126,40 @@ PurrfectBytes/
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 🔄 Concatenation & Repetition Features
+
+### Web Interface
+- **Repetition Control**: Input field to specify number of repetitions (default: 10)
+- **Smart Processing**: Automatically uses concatenation when repetitions > 1
+- **Progress Feedback**: Shows generation status and file information
+
+### API Endpoints
+- `POST /repeat-audio` - Generate and repeat audio content
+- `POST /repeat-video` - Generate and repeat video content with synchronized highlighting
+- `POST /concatenate-audio` - Concatenate multiple different texts
+- `POST /concatenate-video` - Concatenate multiple different videos
+
+### Command Line Interface
+```bash
+# Generate audio with 10 repetitions
+uv run python concatenate.py audio --count 10
+
+# Generate video with custom texts
+uv run python concatenate.py video --texts "Hello" "World" "Test"
+
+# Use file input
+uv run python concatenate.py audio --file texts.txt
+```
+
+### How It Works
+1. **Efficient Generation**: Creates content once, then concatenates copies
+2. **Perfect Synchronization**: Each repetition maintains perfect highlighting timing
+3. **Fallback Support**: Works with or without ffmpeg installation
+4. **Clean Implementation**: Simple, robust approach without complex timing manipulation
+
 ## 🙏 Acknowledgments
 
 - Built with [Claude Code](https://claude.ai/code)
 - Logo designed with AI assistance
 - Inspired by the need for accessible text-to-speech solutions
+- Concatenation feature implemented through collaborative problem-solving

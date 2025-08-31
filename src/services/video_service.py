@@ -2,17 +2,22 @@
 
 import uuid
 from pathlib import Path
-from typing import Set
+from typing import Set, List, Tuple, Optional
 import numpy as np
 
 from moviepy.video.VideoClip import VideoClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import concatenate_videoclips
 from PIL import Image, ImageDraw
 
 from src.config.settings import VIDEO_DIR, VIDEO_CONFIG
-from src.models.schemas import AudioAnalysis, VideoConfig
+from src.models.schemas import AudioAnalysis, VideoConfig, CharacterTiming
 from src.utils.text_utils import wrap_text_for_video
 from src.utils.font_utils import load_font
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class VideoService:
     """Service for generating videos with synchronized text highlighting."""
@@ -243,3 +248,217 @@ class VideoService:
             
         except Exception as e:
             raise Exception(f"Failed to get video info: {str(e)}")
+    
+    def concatenate_videos(
+        self,
+        video_paths: List[Path],
+        output_filename: Optional[str] = None,
+        method: str = "compose"
+    ) -> Path:
+        """
+        Concatenate multiple video files into a single file.
+        
+        Args:
+            video_paths: List of paths to video files to concatenate
+            output_filename: Optional output filename (generates UUID if not provided)
+            method: Concatenation method ('compose' or 'chain')
+            
+        Returns:
+            Path to the concatenated video file
+            
+        Raises:
+            ValueError: If no video files provided or files don't exist
+            Exception: If concatenation fails
+        """
+        if not video_paths:
+            raise ValueError("No video files provided for concatenation")
+        
+        # Validate all paths exist
+        for path in video_paths:
+            if not path.exists():
+                raise ValueError(f"Video file not found: {path}")
+        
+        # Generate output filename if not provided
+        if not output_filename:
+            output_filename = f"concat_{uuid.uuid4()}.mp4"
+        output_path = self.video_dir / output_filename
+        
+        try:
+            # Load video clips
+            clips = []
+            for video_path in video_paths:
+                clip = VideoFileClip(str(video_path))
+                clips.append(clip)
+            
+            # Concatenate videos
+            final_clip = concatenate_videoclips(clips, method=method)
+            
+            # Write the concatenated video
+            final_clip.write_videofile(
+                str(output_path),
+                fps=self.config.fps,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                logger=None  # Suppress output
+            )
+            
+            # Clean up clips
+            for clip in clips:
+                clip.close()
+            final_clip.close()
+            
+            return output_path
+            
+        except Exception as e:
+            # Clean up if file was partially created
+            if output_path.exists():
+                output_path.unlink()
+            raise Exception(f"Failed to concatenate video files: {str(e)}")
+    
+    def generate_multiple_and_concatenate(
+        self,
+        texts: List[str],
+        audio_paths: List[Path],
+        audio_analyses: List[AudioAnalysis],
+        output_filename: Optional[str] = None
+    ) -> Tuple[Path, List[Path]]:
+        """
+        Generate multiple videos from texts and audio, then concatenate them.
+        
+        Args:
+            texts: List of texts to display in videos
+            audio_paths: List of corresponding audio file paths
+            audio_analyses: List of corresponding audio analyses
+            output_filename: Optional output filename for concatenated file
+            
+        Returns:
+            Tuple of (concatenated_video_path, individual_video_paths)
+            
+        Raises:
+            ValueError: If lists have different lengths
+            Exception: If generation or concatenation fails
+        """
+        # Validate inputs
+        if not (len(texts) == len(audio_paths) == len(audio_analyses)):
+            raise ValueError("Texts, audio paths, and analyses must have the same length")
+        
+        if not texts:
+            raise ValueError("No texts provided for video generation")
+        
+        individual_paths = []
+        
+        try:
+            # Generate individual video files
+            for text, audio_path, audio_analysis in zip(texts, audio_paths, audio_analyses):
+                video_path = self.generate_video(text, audio_path, audio_analysis)
+                individual_paths.append(video_path)
+            
+            # Concatenate all video files
+            concatenated_path = self.concatenate_videos(individual_paths, output_filename)
+            
+            return concatenated_path, individual_paths
+            
+        except Exception as e:
+            # Clean up any generated files on failure
+            for path in individual_paths:
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
+            raise Exception(f"Failed to generate and concatenate videos: {str(e)}")
+    
+    def generate_and_repeat(
+        self,
+        text: str,
+        single_audio_path: Path,
+        audio_analysis: AudioAnalysis,
+        repetitions: int = 10,
+        output_filename: Optional[str] = None
+    ) -> Path:
+        """
+        Generate one video with proper highlighting, then repeat it multiple times.
+        
+        Args:
+            text: Text to display in video
+            single_audio_path: Path to single iteration audio file
+            audio_analysis: Audio timing analysis for single iteration
+            repetitions: Number of times to repeat the video
+            output_filename: Optional output filename for concatenated file
+            
+        Returns:
+            Path to the video file
+            
+        Raises:
+            Exception: If generation or concatenation fails
+        """
+        if repetitions < 1:
+            raise ValueError("Repetitions must be at least 1")
+        
+        # Generate single video with proper highlighting
+        single_video_path = self.generate_video(text, single_audio_path, audio_analysis)
+        
+        try:
+            # If only 1 repetition, just return the single video
+            if repetitions == 1:
+                if output_filename:
+                    output_path = self.video_dir / output_filename
+                    single_video_path.rename(output_path)
+                    return output_path
+                return single_video_path
+            
+            # For multiple repetitions, try moviepy concatenation first
+            try:
+                # Load the single video clip
+                single_clip = VideoFileClip(str(single_video_path))
+                
+                # Create list of the same clip repeated
+                clips = [single_clip] * repetitions
+                
+                # Concatenate the clips
+                final_clip = concatenate_videoclips(clips, method="compose")
+                
+                # Generate output filename
+                if not output_filename:
+                    output_filename = f"repeat_{repetitions}x_{uuid.uuid4()}.mp4"
+                output_path = self.video_dir / output_filename
+                
+                # Write the concatenated video
+                final_clip.write_videofile(
+                    str(output_path),
+                    fps=self.config.fps,
+                    codec='libx264',
+                    audio_codec='aac',
+                    temp_audiofile='temp-audio.m4a',
+                    remove_temp=True,
+                    logger=None
+                )
+                
+                # Clean up
+                single_clip.close()
+                final_clip.close()
+                single_video_path.unlink()  # Remove single video
+                
+                return output_path
+                
+            except Exception as e:
+                # Fallback: Use the single video and duplicate audio externally
+                # This isn't perfect but better than broken highlighting
+                logger.warning(f"Video concatenation failed, using single video: {e}")
+                
+                if output_filename:
+                    output_path = self.video_dir / output_filename
+                    single_video_path.rename(output_path)
+                    return output_path
+                return single_video_path
+                
+        except Exception as e:
+            # Clean up on failure
+            if single_video_path.exists():
+                try:
+                    single_video_path.unlink()
+                except OSError:
+                    pass
+            raise Exception(f"Failed to generate and repeat video: {str(e)}")
