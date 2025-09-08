@@ -33,7 +33,7 @@ A comprehensive web application that converts text into audio files and synchron
 ```bash
 # Clone the repository
 git clone https://github.com/enfeizhan/PurrfectBytes.git
-cd PurrfectBytes
+cd PurrfectBytes/PurrfectBytes_Web
 
 # Install dependencies
 uv sync
@@ -63,6 +63,8 @@ cd PurrfectBytes_Android
 
 ### Running Tests
 ```bash
+cd PurrfectBytes_Web
+
 # Install test dependencies
 uv sync --extra test
 
@@ -75,6 +77,8 @@ uv run pytest tests/ --cov=src --cov-report=html
 
 ### Code Quality
 ```bash
+cd PurrfectBytes_Web
+
 # Install dev dependencies
 uv sync --extra dev
 
@@ -91,23 +95,27 @@ uv run mypy src/
 
 ```
 PurrfectBytes/
-├── src/                    # Source code
-│   ├── api/               # FastAPI routes and endpoints
-│   ├── services/          # Business logic services
-│   ├── models/            # Pydantic data models
-│   ├── utils/             # Utility functions
-│   └── config/            # Configuration management
-├── tests/                 # Test suite
-│   ├── unit/              # Unit tests
-│   └── integration/       # Integration tests
-├── templates/             # HTML templates
-├── audio_files/           # Generated audio files (ignored)
-├── video_files/           # Generated video files (ignored)
+├── PurrfectBytes_Web/     # FastAPI Web Application
+│   ├── src/              # Source code
+│   │   ├── api/          # FastAPI routes and endpoints
+│   │   ├── services/     # Business logic services
+│   │   ├── models/       # Pydantic data models
+│   │   ├── utils/        # Utility functions
+│   │   └── config/       # Configuration management
+│   ├── tests/            # Test suite
+│   │   ├── unit/         # Unit tests
+│   │   └── integration/  # Integration tests
+│   ├── templates/        # HTML templates
+│   ├── audio_files/      # Generated audio files (ignored)
+│   ├── video_files/      # Generated video files (ignored)
+│   ├── main.py           # Application entry point
+│   ├── pyproject.toml    # Project configuration
+│   └── uv.lock          # Dependency lock file
 ├── PurrfectBytes_iOS/     # Native Swift iOS app
 │   └── PurrfectBytes/    # SwiftUI implementation
 ├── PurrfectBytes_Android/ # Native Kotlin Android app
 │   └── app/              # Jetpack Compose implementation
-└── main.py               # Application entry point
+└── README.md             # This file
 ```
 
 ## 🌍 API Endpoints
