@@ -44,6 +44,21 @@ uv run uvicorn main:app --reload
 
 Visit `http://localhost:8000` to access the web interface.
 
+### Mobile App Setup
+
+#### Flutter App (iOS + Android)
+```bash
+cd purrfect_bytes_mobile
+flutter pub get
+flutter run  # Select your device
+```
+
+#### Native iOS App (Optional)
+```bash
+cd PurrfectBytes_iOS
+open PurrfectBytes.xcodeproj  # Opens in Xcode
+```
+
 ## 🛠️ Development
 
 ### Running Tests
@@ -88,6 +103,13 @@ PurrfectBytes/
 ├── templates/             # HTML templates
 ├── audio_files/           # Generated audio files (ignored)
 ├── video_files/           # Generated video files (ignored)
+├── purrfect_bytes_mobile/ # Flutter mobile app (iOS + Android)
+│   ├── lib/              # Dart/Flutter code
+│   ├── android/          # Android-specific code
+│   ├── ios/              # iOS-specific code
+│   └── pubspec.yaml      # Flutter dependencies
+├── PurrfectBytes_iOS/     # Native Swift iOS app (optional)
+│   └── PurrfectBytes/    # SwiftUI implementation
 └── main.py               # Application entry point
 ```
 
@@ -104,6 +126,7 @@ PurrfectBytes/
 
 ## 🎨 Technology Stack
 
+### Backend (Web API)
 - **Backend**: FastAPI, Python 3.13
 - **Text-to-Speech**: Google Text-to-Speech (gTTS)
 - **Video Processing**: MoviePy, PIL/Pillow
@@ -111,6 +134,13 @@ PurrfectBytes/
 - **Audio Analysis**: librosa
 - **Testing**: pytest, httpx
 - **Dependency Management**: uv
+
+### Mobile Apps
+- **Flutter App**: Dart, Flutter SDK 3.0+
+- **iOS Native**: Swift 5, SwiftUI, AVFoundation
+- **Android Native**: Kotlin, Jetpack Compose
+- **State Management**: Provider pattern
+- **Networking**: Dio (Flutter), URLSession (iOS)
 
 ## 🤝 Contributing
 

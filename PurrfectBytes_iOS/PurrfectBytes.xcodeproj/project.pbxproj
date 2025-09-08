@@ -1,0 +1,57 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		/* Add your build files here */
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		/* Add your file references here */
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		MainGroup = {
+			isa = PBXGroup;
+			children = (
+				PurrfectBytesApp,
+			);
+		};
+/* End PBXGroup section */
+
+/* Begin PBXProject section */
+		Project = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					AppTarget = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = MainGroup;
+			productRefGroup = Products;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AppTarget,
+			);
+		};
+/* End PBXProject section */
+	};
+	rootObject = Project;
+}
