@@ -70,3 +70,22 @@ Thumbs.db
 *.temp
 temp/
 tmp/
+
+# Android / Gradle
+*.iml
+.gradle/
+/local.properties
+/.idea/
+*.jks
+*.keystore
+/build
+/captures
+.externalNativeBuild
+.cxx
+PurrfectBytesAndroid/.gradle/
+PurrfectBytesAndroid/build/
+PurrfectBytesAndroid/*/build/
+PurrfectBytesAndroid/local.properties
+PurrfectBytesAndroid/.idea/
+PurrfectBytesAndroid/*.iml
+PurrfectBytesAndroid/app/*.iml
