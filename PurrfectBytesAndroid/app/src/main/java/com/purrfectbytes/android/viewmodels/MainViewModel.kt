@@ -1,5 +1,6 @@
 package com.purrfectbytes.android.viewmodels
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.purrfectbytes.android.services.TTSService
@@ -19,7 +20,13 @@ class MainViewModel @Inject constructor(
     
     private val _generatedAudioFile = MutableStateFlow<File?>(null)
     val generatedAudioFile: StateFlow<File?> = _generatedAudioFile.asStateFlow()
-    
+
+    private val _capturedPhotoUri = MutableStateFlow<Uri?>(null)
+    val capturedPhotoUri: StateFlow<Uri?> = _capturedPhotoUri.asStateFlow()
+
+    private val _showCamera = MutableStateFlow(false)
+    val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
+
     val isLoading = ttsService.isLoading
     val currentStatus = ttsService.currentStatus
     
@@ -111,7 +118,27 @@ class MainViewModel @Inject constructor(
     fun getSupportedLanguages(): List<Pair<String, String>> {
         return ttsService.getSupportedLanguages()
     }
-    
+
+    fun openCamera() {
+        _showCamera.value = true
+    }
+
+    fun closeCamera() {
+        _showCamera.value = false
+    }
+
+    fun onPhotoCaptured(uri: Uri) {
+        _capturedPhotoUri.value = uri
+        _showCamera.value = false
+        _uiState.value = _uiState.value.copy(
+            successMessage = "Photo captured successfully!"
+        )
+    }
+
+    fun clearPhoto() {
+        _capturedPhotoUri.value = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         ttsService.cleanup()
