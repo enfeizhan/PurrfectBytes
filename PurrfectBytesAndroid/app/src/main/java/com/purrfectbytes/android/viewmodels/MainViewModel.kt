@@ -4,6 +4,9 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.purrfectbytes.android.services.TTSService
+import com.purrfectbytes.android.services.TextRecognitionProcessor
+import com.purrfectbytes.android.services.RecognizedTextBlock
+import com.purrfectbytes.android.services.RecognitionScript
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -12,7 +15,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val ttsService: TTSService
+    private val ttsService: TTSService,
+    private val textRecognitionProcessor: TextRecognitionProcessor
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -26,6 +30,18 @@ class MainViewModel @Inject constructor(
 
     private val _showCamera = MutableStateFlow(false)
     val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
+
+    private val _recognizedTextBlocks = MutableStateFlow<List<RecognizedTextBlock>>(emptyList())
+    val recognizedTextBlocks: StateFlow<List<RecognizedTextBlock>> = _recognizedTextBlocks.asStateFlow()
+
+    private val _isAnalyzingPhoto = MutableStateFlow(false)
+    val isAnalyzingPhoto: StateFlow<Boolean> = _isAnalyzingPhoto.asStateFlow()
+
+    private val _showTextAnalyzer = MutableStateFlow(false)
+    val showTextAnalyzer: StateFlow<Boolean> = _showTextAnalyzer.asStateFlow()
+
+    private val _selectedScript = MutableStateFlow(RecognitionScript.AUTO)
+    val selectedScript: StateFlow<RecognitionScript> = _selectedScript.asStateFlow()
 
     val isLoading = ttsService.isLoading
     val currentStatus = ttsService.currentStatus
@@ -131,17 +147,70 @@ class MainViewModel @Inject constructor(
         _capturedPhotoUri.value = uri
         _showCamera.value = false
         _uiState.value = _uiState.value.copy(
-            successMessage = "Photo captured successfully!"
+            successMessage = "Photo captured successfully! Analyzing text..."
         )
+        analyzePhotoForText(uri)
     }
 
     fun clearPhoto() {
         _capturedPhotoUri.value = null
+        _recognizedTextBlocks.value = emptyList()
+        _showTextAnalyzer.value = false
+    }
+
+    private fun analyzePhotoForText(uri: Uri) {
+        viewModelScope.launch {
+            _isAnalyzingPhoto.value = true
+            _showTextAnalyzer.value = true
+
+            textRecognitionProcessor.processImageFromUri(uri, _selectedScript.value).fold(
+                onSuccess = { blocks ->
+                    _recognizedTextBlocks.value = blocks
+                    _isAnalyzingPhoto.value = false
+                    if (blocks.isNotEmpty()) {
+                        val scriptInfo = blocks.firstOrNull()?.detectedLanguage ?: "unknown"
+                        _uiState.value = _uiState.value.copy(
+                            successMessage = "Found ${blocks.size} text block(s) using $scriptInfo recognizer!"
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            errorMessage = "No text detected. Try a different language option."
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _isAnalyzingPhoto.value = false
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "Failed to analyze text: ${error.message}"
+                    )
+                }
+            )
+        }
+    }
+
+    fun reanalyzeWithScript(script: RecognitionScript) {
+        _selectedScript.value = script
+        _capturedPhotoUri.value?.let { uri ->
+            analyzePhotoForText(uri)
+        }
+    }
+
+    fun onTextBlockClick(text: String) {
+        updateText(text)
+        _showTextAnalyzer.value = false
+        _uiState.value = _uiState.value.copy(
+            successMessage = "Text added to input field"
+        )
+    }
+
+    fun dismissTextAnalyzer() {
+        _showTextAnalyzer.value = false
     }
 
     override fun onCleared() {
         super.onCleared()
         ttsService.cleanup()
+        textRecognitionProcessor.close()
     }
 }
 

@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.purrfectbytes.android.services.TTSService
+import com.purrfectbytes.android.services.TextRecognitionProcessor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -17,16 +18,28 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "se
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
-    
+
+    @Provides
+    @Singleton
+    fun provideContext(@ApplicationContext context: Context): Context {
+        return context
+    }
+
     @Provides
     @Singleton
     fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
         return context.dataStore
     }
-    
+
     @Provides
     @Singleton
     fun provideTTSService(@ApplicationContext context: Context): TTSService {
         return TTSService(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideTextRecognitionProcessor(@ApplicationContext context: Context): TextRecognitionProcessor {
+        return TextRecognitionProcessor(context)
     }
 }

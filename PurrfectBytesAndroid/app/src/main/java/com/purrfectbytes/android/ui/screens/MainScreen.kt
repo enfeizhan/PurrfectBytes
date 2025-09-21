@@ -16,6 +16,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.purrfectbytes.android.ui.components.PhotoTextAnalyzer
+import com.purrfectbytes.android.ui.components.PhotoWithTextOverlay
+import com.purrfectbytes.android.ui.components.PrecisePhotoTextOverlay
+import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.viewmodels.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,6 +33,10 @@ fun MainScreen(
     val currentStatus by viewModel.currentStatus.collectAsState()
     val generatedAudioFile by viewModel.generatedAudioFile.collectAsState()
     val capturedPhotoUri by viewModel.capturedPhotoUri.collectAsState()
+    val recognizedTextBlocks by viewModel.recognizedTextBlocks.collectAsState()
+    val isAnalyzingPhoto by viewModel.isAnalyzingPhoto.collectAsState()
+    val showTextAnalyzer by viewModel.showTextAnalyzer.collectAsState()
+    val selectedScript by viewModel.selectedScript.collectAsState()
 
     val supportedLanguages = remember { viewModel.getSupportedLanguages() }
     
@@ -83,8 +91,8 @@ fun MainScreen(
                 }
             }
         }
-        
-        // Captured Photo Display
+
+        // Captured Photo Display with Text Overlay
         capturedPhotoUri?.let { uri ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -101,12 +109,21 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "📷 Captured Photo",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
+                        Column {
+                            Text(
+                                text = "📷 Captured Photo",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            if (recognizedTextBlocks.isNotEmpty()) {
+                                Text(
+                                    text = "Tap on text to select",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
                         IconButton(
                             onClick = { viewModel.clearPhoto() },
                             modifier = Modifier.size(32.dp)
@@ -121,17 +138,88 @@ fun MainScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                    ) {
-                        AsyncImage(
-                            model = uri,
-                            contentDescription = "Captured Photo",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                    if (isAnalyzingPhoto) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(300.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(48.dp))
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "Analyzing text in image...",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Photo with precise clickable text overlay
+                        PrecisePhotoTextOverlay(
+                            photoUri = uri,
+                            recognizedBlocks = recognizedTextBlocks,
+                            onTextClick = { text ->
+                                viewModel.onTextBlockClick(text)
+                            }
                         )
+                    }
+
+                    // Language selector for re-analysis
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Text Language:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+
+                        // Script selection chips
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedScript == RecognitionScript.AUTO,
+                                onClick = { viewModel.reanalyzeWithScript(RecognitionScript.AUTO) },
+                                label = { Text("Auto", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            FilterChip(
+                                selected = selectedScript == RecognitionScript.LATIN,
+                                onClick = { viewModel.reanalyzeWithScript(RecognitionScript.LATIN) },
+                                label = { Text("English", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            FilterChip(
+                                selected = selectedScript == RecognitionScript.JAPANESE,
+                                onClick = { viewModel.reanalyzeWithScript(RecognitionScript.JAPANESE) },
+                                label = { Text("日本語", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            FilterChip(
+                                selected = selectedScript == RecognitionScript.CHINESE,
+                                onClick = { viewModel.reanalyzeWithScript(RecognitionScript.CHINESE) },
+                                label = { Text("中文", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                            FilterChip(
+                                selected = selectedScript == RecognitionScript.KOREAN,
+                                onClick = { viewModel.reanalyzeWithScript(RecognitionScript.KOREAN) },
+                                label = { Text("한글", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
                     }
                 }
             }

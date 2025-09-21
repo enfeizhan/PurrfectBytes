@@ -116,6 +116,17 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.1")
     implementation("androidx.camera:camera-view:1.3.1")
 
+    // ML Kit Text Recognition
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    // Add support for Chinese, Japanese, Korean
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.0")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.0")
+    // Add support for Devanagari script (Hindi, Sanskrit, etc.)
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.0")
+    // Language identification
+    implementation("com.google.mlkit:language-id:17.0.4")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
