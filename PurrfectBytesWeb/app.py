@@ -84,33 +84,77 @@ async def delete_audio(filename: str):
         return {"success": True, "message": "File deleted"}
     return {"error": "File not found"}
 
-def load_font(font_size=48):
-    """Load a TrueType font or fall back to default - cross-platform support"""
+def test_font_supports_text(font, text):
+    """Test if a font can render the given text"""
+    try:
+        from PIL import ImageDraw, Image
+        # Create a small test image
+        test_img = Image.new('RGB', (100, 100))
+        draw = ImageDraw.Draw(test_img)
+        # Try to get bbox for each character
+        for char in text:
+            try:
+                draw.textbbox((0, 0), char, font=font)
+            except:
+                return False
+        return True
+    except:
+        return False
+
+def load_font_for_text(text, font_size=48):
+    """Load a font that supports the given text - with CJK prioritization"""
     import platform
 
     system = platform.system()
 
-    # Platform-specific font paths
+    # Check if text contains CJK characters
+    has_cjk = any(is_cjk_character(char) for char in text if char.strip())
+
+    # Platform-specific font paths - CJK fonts first if needed
     if system == "Darwin":  # macOS
-        font_paths = [
-            "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/System/Library/Fonts/Avenir.ttc",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-        ]
+        if has_cjk:
+            font_paths = [
+                "/Library/Fonts/Arial Unicode.ttf",  # Supports CJK
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            ]
+        else:
+            font_paths = [
+                "/Library/Fonts/Arial Unicode.ttf",
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/System/Library/Fonts/Avenir.ttc",
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+            ]
     elif system == "Linux":
-        font_paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
-        ]
+        if has_cjk:
+            # Prioritize Noto CJK fonts for Asian languages
+            font_paths = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.otf",
+                "/usr/share/fonts/truetype/noto/NotoSansCJKjp-Regular.otf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            ]
+        else:
+            font_paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+            ]
     elif system == "Windows":
-        font_paths = [
-            "C:\\Windows\\Fonts\\arial.ttf",
-            "C:\\Windows\\Fonts\\calibri.ttf",
-            "C:\\Windows\\Fonts\\segoeui.ttf",
-        ]
+        if has_cjk:
+            font_paths = [
+                "C:\\Windows\\Fonts\\msgothic.ttc",  # MS Gothic (Japanese)
+                "C:\\Windows\\Fonts\\msyh.ttc",      # Microsoft YaHei (Chinese)
+                "C:\\Windows\\Fonts\\malgun.ttf",    # Malgun Gothic (Korean)
+                "C:\\Windows\\Fonts\\arial.ttf",
+            ]
+        else:
+            font_paths = [
+                "C:\\Windows\\Fonts\\arial.ttf",
+                "C:\\Windows\\Fonts\\calibri.ttf",
+                "C:\\Windows\\Fonts\\segoeui.ttf",
+            ]
     else:
         font_paths = []
 
@@ -118,22 +162,52 @@ def load_font(font_size=48):
     for font_path in font_paths:
         try:
             font = ImageFont.truetype(font_path, font_size)
-            print(f"✓ Loaded font: {font_path} at size {font_size}")
-            return font
+            # Test if font supports the text
+            if test_font_supports_text(font, text):
+                print(f"✓ Loaded font: {font_path} at size {font_size}")
+                return font
+            else:
+                print(f"⚠ Font {font_path} doesn't support all characters in text, trying next...")
         except (OSError, IOError):
             continue
 
-    # If no primary fonts found, search system directories
+    # If no primary fonts found, search system directories for Noto CJK fonts
+    if system == "Linux" and has_cjk:
+        print("🔍 Searching for CJK fonts in system directories...")
+        search_patterns = ["noto", "cjk", "jp", "cn", "kr", "japanese", "chinese", "korean"]
+        search_dirs = ["/usr/share/fonts"]
+
+        for search_dir in search_dirs:
+            if not os.path.exists(search_dir):
+                continue
+            try:
+                for root, dirs, files in os.walk(search_dir):
+                    # Prioritize directories with CJK-related names
+                    if has_cjk and not any(pattern in root.lower() for pattern in search_patterns):
+                        continue
+
+                    for font_file in files:
+                        if font_file.endswith(('.ttf', '.ttc', '.otf')):
+                            # Prioritize CJK fonts
+                            if has_cjk and not any(pattern in font_file.lower() for pattern in search_patterns):
+                                continue
+
+                            try:
+                                font_path = os.path.join(root, font_file)
+                                font = ImageFont.truetype(font_path, font_size)
+                                if test_font_supports_text(font, text):
+                                    print(f"✓ Loaded font: {font_path} at size {font_size}")
+                                    return font
+                            except (OSError, IOError):
+                                continue
+            except (OSError, PermissionError):
+                continue
+
+    # Fallback: search all system directories
     if system == "Linux":
-        search_dirs = [
-            "/usr/share/fonts",
-            "/usr/local/share/fonts",
-        ]
+        search_dirs = ["/usr/share/fonts", "/usr/local/share/fonts"]
     elif system == "Darwin":
-        search_dirs = [
-            "/Library/Fonts",
-            "/System/Library/Fonts",
-        ]
+        search_dirs = ["/Library/Fonts", "/System/Library/Fonts"]
     elif system == "Windows":
         search_dirs = ["C:\\Windows\\Fonts"]
     else:
@@ -145,20 +219,29 @@ def load_font(font_size=48):
         try:
             for root, dirs, files in os.walk(search_dir):
                 for font_file in files:
-                    if font_file.endswith(('.ttf', '.ttc')):
+                    if font_file.endswith(('.ttf', '.ttc', '.otf')):
                         try:
                             font_path = os.path.join(root, font_file)
                             font = ImageFont.truetype(font_path, font_size)
-                            print(f"✓ Loaded font: {font_path} at size {font_size}")
-                            return font
+                            if test_font_supports_text(font, text):
+                                print(f"✓ Loaded font: {font_path} at size {font_size}")
+                                return font
                         except (OSError, IOError):
                             continue
         except (OSError, PermissionError):
             continue
 
     # Fallback to default (this will be tiny!)
-    print(f"⚠ WARNING: No TrueType fonts found, using default bitmap font (will be very small!)")
+    print(f"⚠ WARNING: No suitable TrueType fonts found for this text, using default bitmap font")
     return ImageFont.load_default()
+
+def load_font(font_size=48, text=None):
+    """Load a font - optionally optimized for specific text"""
+    if text:
+        return load_font_for_text(text, font_size)
+    else:
+        # For backward compatibility, load a general-purpose font
+        return load_font_for_text("ABCabc123", font_size)
 
 def is_cjk_character(char):
     """Check if character is Chinese, Japanese, or Korean"""
@@ -455,8 +538,8 @@ def create_character_animated_video(text, audio_path, output_path, font_size=48)
     fps = 24
     bg_color = (30, 30, 40)  # Fallback color if no background image
 
-    # Font settings (accept custom font_size parameter)
-    font = load_font(font_size)
+    # Font settings (accept custom font_size parameter, load font optimized for text)
+    font = load_font(font_size, text=text)
 
     # Load background image (configurable - just replace assets/background.png to change it)
     background_img = None
