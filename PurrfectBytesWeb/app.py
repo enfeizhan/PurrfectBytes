@@ -388,7 +388,7 @@ def analyze_audio_timing(text, audio_path):
             })
         return char_timings
 
-def create_character_animated_video(text, audio_path, output_path):
+def create_character_animated_video(text, audio_path, output_path, font_size=48):
     """Create video with character-level highlighting"""
 
     # Load audio and get duration
@@ -404,8 +404,7 @@ def create_character_animated_video(text, audio_path, output_path):
     fps = 24
     bg_color = (30, 30, 40)  # Fallback color if no background image
 
-    # Font settings
-    font_size = 48
+    # Font settings (accept custom font_size parameter)
     font = load_font(font_size)
 
     # Load background image (configurable - just replace assets/background.png to change it)
@@ -546,22 +545,30 @@ def create_character_animated_video(text, audio_path, output_path):
     video.close()
     audio.close()
 
-def create_video_with_text(text, audio_path, output_path, duration=None):
+def create_video_with_text(text, audio_path, output_path, duration=None, font_size=48):
     """Main function to create video with character-level text highlighting"""
-    return create_character_animated_video(text, audio_path, output_path)
+    return create_character_animated_video(text, audio_path, output_path, font_size=font_size)
 
 @app.post("/convert-to-video")
 async def convert_text_to_video(
     text: str = Form(...),
     language: str = Form("en"),
     slow: bool = Form(False),
-    repetitions: int = Form(1)
+    repetitions: int = Form(1),
+    font_size: int = Form(48)
 ):
     if not text:
         return {"error": "No text provided"}
 
     if repetitions < 1 or repetitions > 100:
         return {"error": "Repetitions must be between 1 and 100"}
+
+    # Validate font size
+    if font_size < 16 or font_size > 200:
+        print(f"Font size {font_size} out of range, using default 48")
+        font_size = 48
+
+    print(f"✓ Received font_size parameter: {font_size}")
 
     # Ensure directories exist (in case they were deleted)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -578,8 +585,8 @@ async def convert_text_to_video(
         tts = gTTS(text=text, lang=language, slow=slow)
         tts.save(str(audio_path))
 
-        # Then create video with text and audio (with cat animation)
-        create_video_with_text(text, audio_path, video_path)
+        # Then create video with text and audio (with cat animation) using custom font size
+        create_video_with_text(text, audio_path, video_path, font_size=font_size)
 
         # If only 1 repetition, return the single video
         if repetitions == 1:

@@ -96,34 +96,61 @@ async def convert_to_audio(
 @router.post("/convert-to-video", response_model=ConversionResult)
 async def convert_to_video(
     text: str = Form(...),
-    language: str = Form("en"), 
-    slow: bool = Form(False)
+    language: str = Form("en"),
+    slow: bool = Form(False),
+    font_size: int = Form(48)
 ):
     """Convert text to video with synchronized highlighting."""
-    with RequestLogger(logger, f"video conversion ({language})"):
+    with RequestLogger(logger, f"video conversion ({language}, font_size={font_size})"):
         audio_path = None
         video_path = None
-        
+
         try:
             # Validate language
             if not language_service.is_supported_language(language):
                 language = "en"
                 logger.warning(f"Unsupported language, defaulting to English")
-            
+
+            # Validate font size (reasonable range)
+            if font_size < 16 or font_size > 200:
+                logger.warning(f"Font size {font_size} out of range, using default 48")
+                font_size = 48
+
+            logger.info(f"Received font_size parameter: {font_size}")
+
             # Generate audio first
             logger.info("Generating audio for video")
             audio_path, duration = tts_service.generate_audio(text, language, slow)
-            
+
             # Analyze audio timing
             logger.info("Analyzing audio timing")
             audio_analysis = tts_service.analyze_audio_timing(text, audio_path)
-            
-            # Generate video
-            logger.info("Generating video with character highlighting")
-            video_path = video_service.generate_video(text, audio_path, audio_analysis)
-            
+
+            # Create custom video config with user-specified font size
+            from src.models.schemas import VideoConfig
+            from src.config.settings import VIDEO_CONFIG
+
+            # Calculate proportional sizes
+            bold_size = int(font_size * 1.2)
+            line_height = int(font_size * 1.5)
+
+            logger.info(f"Creating video config: font_size={font_size}, bold={bold_size}, line_height={line_height}")
+
+            custom_config = VideoConfig(
+                **{**VIDEO_CONFIG,
+                   "font_size": font_size,
+                   "font_size_bold": bold_size,
+                   "line_height": line_height
+                }
+            )
+
+            # Generate video with custom config
+            logger.info(f"Generating video with character highlighting (font_size={font_size})")
+            custom_video_service = VideoService(config=custom_config)
+            video_path = custom_video_service.generate_video(text, audio_path, audio_analysis)
+
             logger.info(f"Video generated successfully: {video_path.name}")
-            
+
             return ConversionResult(
                 success=True,
                 audio_filename=audio_path.name,
@@ -353,35 +380,62 @@ async def repeat_video_endpoint(
     text: str = Form(...),
     repetitions: int = Form(10),
     language: str = Form("en"),
-    slow: bool = Form(False)
+    slow: bool = Form(False),
+    font_size: int = Form(48)
 ):
     """Generate video once and repeat it multiple times."""
-    with RequestLogger(logger, "video repetition"):
+    with RequestLogger(logger, f"video repetition (font_size={font_size})"):
         try:
             # Validate input
             if not text:
                 raise HTTPException(status_code=400, detail="No text provided")
             if repetitions < 1 or repetitions > 100:
                 raise HTTPException(status_code=400, detail="Repetitions must be between 1 and 100")
-            
+
+            # Validate font size
+            if font_size < 16 or font_size > 200:
+                logger.warning(f"Font size {font_size} out of range, using default 48")
+                font_size = 48
+
+            logger.info(f"Repeat-video received font_size parameter: {font_size}")
+
             # Auto-detect language if requested
             if language == "auto":
                 lang_result = language_service.detect_language(text)
                 language = lang_result.language
                 logger.info(f"Auto-detected language: {language}")
-            
+
             # Generate single audio and analyze it
             single_audio_path, single_duration = tts_service.generate_audio(
                 text=text,
                 language=language,
                 slow=slow
             )
-            
+
             # Analyze the single audio for timing
             audio_analysis = tts_service.analyze_audio_timing(text, single_audio_path)
-            
-            # Generate video with proper concatenation (this will handle the repetitions)
-            video_path = video_service.generate_and_repeat(
+
+            # Create custom video config with user-specified font size
+            from src.models.schemas import VideoConfig
+            from src.config.settings import VIDEO_CONFIG
+
+            # Calculate proportional sizes
+            bold_size = int(font_size * 1.2)
+            line_height = int(font_size * 1.5)
+
+            logger.info(f"Repeat-video creating config: font_size={font_size}, bold={bold_size}, line_height={line_height}")
+
+            custom_config = VideoConfig(
+                **{**VIDEO_CONFIG,
+                   "font_size": font_size,
+                   "font_size_bold": bold_size,
+                   "line_height": line_height
+                }
+            )
+
+            # Generate video with custom config and repetitions
+            custom_video_service = VideoService(config=custom_config)
+            video_path = custom_video_service.generate_and_repeat(
                 text=text,
                 single_audio_path=single_audio_path,
                 audio_analysis=audio_analysis,

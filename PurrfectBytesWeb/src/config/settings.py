@@ -40,13 +40,36 @@ AUDIO_CONFIG = {
     "temp_audio_file": "temp-audio.m4a",
 }
 
-# Font settings
-FONT_CONFIG = {
-    "primary_paths": [
+# Font settings - Platform-specific primary font paths
+import platform
+
+_system = platform.system()
+
+if _system == "Darwin":  # macOS
+    _primary_font_paths = [
         "/Library/Fonts/Arial Unicode.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/Avenir.ttc",
-    ],
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+    ]
+elif _system == "Linux":
+    _primary_font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+    ]
+elif _system == "Windows":
+    _primary_font_paths = [
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+    ]
+else:
+    _primary_font_paths = []
+
+FONT_CONFIG = {
+    "primary_paths": _primary_font_paths,
     "fallback_size": 48,
 }
 
