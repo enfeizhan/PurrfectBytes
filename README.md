@@ -241,7 +241,7 @@ Given a target sentence, generate:
    ---
 
    📌 **Credit:**
-   This sentence is from [indicate it's from another creator/source - keep it general and respectful]
+   This sentence is sourced from another creator's content. All credit goes to the original author.
 
    👍 **Enjoyed this study session?** Please give it a thumbs up!
    🔔 **Subscribe** to follow my language learning journey and practice together!
