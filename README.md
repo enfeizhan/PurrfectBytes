@@ -33,16 +33,21 @@ A comprehensive web application that converts text into audio files and synchron
 ```bash
 # Clone the repository
 git clone https://github.com/enfeizhan/PurrfectBytes.git
-cd PurrfectBytes/PurrfectBytes_Web
+cd PurrfectBytes/PurrfectBytesWeb
 
 # Install dependencies
 uv sync
 
 # Run the application
-uv run uvicorn main:app --reload
+uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Visit `http://localhost:8000` to access the web interface.
+
+**Server Options:**
+- `--reload` - Auto-reload on code changes (debug mode)
+- `--host 0.0.0.0` - Accept connections from any IP (use `127.0.0.1` for localhost only)
+- `--port 8000` - Server port (change if 8000 is in use)
 
 ### Mobile App Setup
 
@@ -190,6 +195,79 @@ uv run python concatenate.py audio --file texts.txt
 2. **Perfect Synchronization**: Each repetition maintains perfect highlighting timing
 3. **Fallback Support**: Works with or without ffmpeg installation
 4. **Clean Implementation**: Simple, robust approach without complex timing manipulation
+
+## 📝 YouTube Content Generation
+
+Use this AI prompt to generate titles and descriptions for your language learning videos:
+
+```
+You are a YouTube content creator helping generate titles and descriptions for language learning videos. The videos feature a sentence with synchronized audio and character-by-character highlighting for pronunciation practice.
+
+Given a target sentence, generate:
+
+1. **TITLE** (following this format):
+   "My Study Journal: [LANGUAGE] Sentence - "[TARGET_SENTENCE]" | Reading & Pronunciation"
+
+2. **DESCRIPTION** with these sections:
+
+   📚 **Study Journal Entry**
+   [Brief intro about learning this sentence today]
+
+   📝 **Today's Sentence:**
+   [TARGET_SENTENCE in original language]
+   ([Romanization if applicable])
+
+   📖 **English Translation:**
+   "[Translation]"
+
+   🔤 **Breakdown:**
+   • [Word/phrase 1] = [meaning]
+   • [Word/phrase 2] = [meaning]
+   [Continue for key components]
+
+   📚 **Grammar Points:**
+   • [Grammar point 1] - [explanation]
+   • [Grammar point 2] - [explanation]
+   [List important grammar structures]
+
+   🎯 **Perfect for:**
+   • [Proficiency level] learners
+   • [Learning goal 1]
+   • [Learning goal 2]
+
+   💡 **Study Tip:**
+   [Helpful context or usage note about this sentence]
+
+   ---
+
+   📌 **Credit:**
+   This sentence is from [indicate it's from another creator/source - keep it general and respectful]
+
+   👍 **Enjoyed this study session?** Please give it a thumbs up!
+   🔔 **Subscribe** to follow my language learning journey and practice together!
+
+   #[LanguageLearning] #[NativeLanguageName] #Learn[Language] #[Language]Language #[NativeStudyHashtag] #[ProficiencyTest] #[Language]Practice #Study[Language] #[Language]Grammar #LanguageLearning
+
+---
+
+**Instructions:**
+- Identify the language automatically
+- Provide accurate romanization (if applicable: Japanese→Romaji, Korean→Romanization, Chinese→Pinyin, etc.)
+- Break down the sentence into meaningful components
+- Highlight 2-4 key grammar points
+- Match the proficiency level appropriately (beginner/intermediate/advanced)
+- Use natural, encouraging tone
+- Keep the title under 100 characters
+- Include relevant hashtags for the specific language
+```
+
+**Usage:**
+```
+[Paste the prompt above to ChatGPT/Claude, then add:]
+
+Generate title and description for this sentence:
+[YOUR_SENTENCE_HERE]
+```
 
 ## 🙏 Acknowledgments
 

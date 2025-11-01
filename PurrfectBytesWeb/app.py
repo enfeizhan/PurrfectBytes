@@ -22,10 +22,14 @@ from langdetect.lang_detect_exception import LangDetectException
 
 app = FastAPI()
 
-AUDIO_DIR = Path("audio_files")
-AUDIO_DIR.mkdir(exist_ok=True)
-VIDEO_DIR = Path("video_files")
-VIDEO_DIR.mkdir(exist_ok=True)
+# Use /tmp for temporary files (auto-cleaned by OS)
+AUDIO_DIR = Path("/tmp/purrfect_bytes/audio")
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_DIR = Path("/tmp/purrfect_bytes/video")
+VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+
+# Assets directory for creative files (background, logos)
+ASSETS_DIR = Path("assets")
 
 templates = Jinja2Templates(directory="templates")
 
@@ -41,7 +45,10 @@ async def convert_text_to_speech(
 ):
     if not text:
         return {"error": "No text provided"}
-    
+
+    # Ensure directories exist (in case they were deleted)
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
     filename = f"{uuid.uuid4()}.mp3"
     filepath = AUDIO_DIR / filename
     
@@ -383,83 +390,139 @@ def analyze_audio_timing(text, audio_path):
 
 def create_character_animated_video(text, audio_path, output_path):
     """Create video with character-level highlighting"""
-    
+
     # Load audio and get duration
     audio = AudioFileClip(str(audio_path))
     duration = audio.duration
-    
+
     # Analyze audio for character timing
     char_timings = analyze_audio_timing(text, audio_path)
-    
+
     # Video settings
     video_width = 1280
     video_height = 720
     fps = 24
-    bg_color = (30, 30, 40)
-    
+    bg_color = (30, 30, 40)  # Fallback color if no background image
+
     # Font settings
     font_size = 48
     font = load_font(font_size)
-    
+
+    # Load background image (configurable - just replace assets/background.png to change it)
+    background_img = None
+    try:
+        bg_path = ASSETS_DIR / "background.png"
+        bg_img = Image.open(bg_path).convert("RGB")
+        # Resize background to match video dimensions
+        background_img = bg_img.resize((video_width, video_height), Image.Resampling.LANCZOS)
+        print(f"✓ Background image loaded successfully! Size: {video_width}x{video_height}")
+    except Exception as e:
+        print(f"⚠ Background image not found, using solid color background: {e}")
+
+    # Load cat logo
+    cat_logo = None
+    cat_size = 80  # Size of the cat logo
+    try:
+        logo_path = ASSETS_DIR / "logo_small.png"
+        cat_img = Image.open(logo_path).convert("RGBA")
+        # Resize cat to appropriate size
+        cat_logo = cat_img.resize((cat_size, cat_size), Image.Resampling.LANCZOS)
+        print(f"✓ Cat logo loaded successfully! Size: {cat_size}x{cat_size}")
+    except Exception as e:
+        print(f"✗ ERROR: Could not load cat logo: {e}")
+        import traceback
+        traceback.print_exc()
+
     # Create a dummy image to calculate text dimensions
     dummy_img = Image.new('RGB', (video_width, video_height))
     dummy_draw = ImageDraw.Draw(dummy_img)
-    
+
     # Wrap text into lines that fit the screen
     lines = wrap_text_for_video(text, video_width, font, dummy_draw)
     
     def make_frame(t):
         """Create a frame at time t with character-level highlighting"""
-        img = Image.new('RGB', (video_width, video_height), color=bg_color)
+        # Use background image if available, otherwise use solid color
+        if background_img is not None:
+            img = background_img.copy()  # Copy to avoid modifying the original
+        else:
+            img = Image.new('RGB', (video_width, video_height), color=bg_color)
         draw = ImageDraw.Draw(img)
-        
+
         # Find which characters should be highlighted at time t
         active_chars = set()
         for timing in char_timings:
             if timing['start_time'] <= t <= timing['end_time']:
                 active_chars.add(timing['position'])
-        
+
         # Draw text with character-level highlighting
+        # Track position of highlighted characters for cat placement
         y_position = (video_height - len(lines) * 70) // 2
         char_position = 0
-        
+        cat_x = None
+        cat_y = None
+
         for line in lines:
             # Calculate line width to center it
             line_width = 0
             for char in line:
                 bbox = draw.textbbox((0, 0), char, font=font)
                 line_width += bbox[2] - bbox[0]
-            
+
             x_position = (video_width - line_width) // 2
-            
+
             for char in line:
                 # Determine if this character should be highlighted
                 is_active = char_position in active_chars
-                
+
                 if is_active:
-                    # Highlighted character
-                    color = (255, 220, 0)  # Bright yellow
-                    # Draw background
+                    # Highlighted character - high contrast for visibility
+                    color = (255, 255, 255)  # White text
+                    # Draw bright contrasting background for highlighting
                     bbox = draw.textbbox((x_position, y_position), char, font=font)
-                    draw.rectangle([bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2], 
-                                 fill=(80, 80, 120))
+                    draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
+                                 fill=(220, 50, 50))  # Bright red background for high contrast
+
+                    # Track position for cat (use middle of highlighted section)
+                    if cat_x is None:
+                        char_width = bbox[2] - bbox[0]
+                        cat_x = x_position + char_width // 2
+                        cat_y = y_position
                 else:
-                    # Normal character
-                    color = (220, 220, 220) if char != ' ' else (220, 220, 220)
-                
+                    # Normal character - dark brown for good contrast with warm beige background
+                    color = (80, 50, 30)  # Dark brown - matches the "Purrfect Bytes" text in the background
+
                 # Draw the character
                 if char != ' ' or not is_active:  # Don't draw space backgrounds
                     draw.text((x_position, y_position), char, font=font, fill=color)
-                
+
                 # Calculate next character position
                 bbox = draw.textbbox((0, 0), char, font=font)
                 char_width = bbox[2] - bbox[0]
                 x_position += char_width
-                
+
                 char_position += 1
-            
+
             y_position += 70  # Line height
-        
+
+        # Draw cat logo above the highlighted character
+        if cat_logo is not None and cat_x is not None and cat_y is not None:
+            # Position cat above the text with some offset
+            cat_offset_y = cat_size + 10  # Position cat above text
+            cat_paste_x = int(cat_x - cat_size // 2)
+            cat_paste_y = int(cat_y - cat_offset_y)
+
+            # Ensure cat stays within bounds
+            cat_paste_x = max(0, min(cat_paste_x, video_width - cat_size))
+            cat_paste_y = max(0, min(cat_paste_y, video_height - cat_size))
+
+            # Debug: print cat position for first frame
+            if t < 0.1:
+                print(f"🐱 Cat positioned at ({cat_paste_x}, {cat_paste_y}) for highlighted char at ({cat_x}, {cat_y})")
+
+            # Paste cat with transparency
+            img.paste(cat_logo, (cat_paste_x, cat_paste_y), cat_logo)
+
         return np.array(img)
     
     # Create video clip from the frame function
@@ -491,32 +554,101 @@ def create_video_with_text(text, audio_path, output_path, duration=None):
 async def convert_text_to_video(
     text: str = Form(...),
     language: str = Form("en"),
-    slow: bool = Form(False)
+    slow: bool = Form(False),
+    repetitions: int = Form(1)
 ):
     if not text:
         return {"error": "No text provided"}
-    
+
+    if repetitions < 1 or repetitions > 100:
+        return {"error": "Repetitions must be between 1 and 100"}
+
+    # Ensure directories exist (in case they were deleted)
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+
     # Generate unique filenames
     audio_filename = f"{uuid.uuid4()}.mp3"
     video_filename = f"{uuid.uuid4()}.mp4"
     audio_path = AUDIO_DIR / audio_filename
     video_path = VIDEO_DIR / video_filename
-    
+
     try:
         # First create audio
         tts = gTTS(text=text, lang=language, slow=slow)
         tts.save(str(audio_path))
-        
-        # Then create video with text and audio
+
+        # Then create video with text and audio (with cat animation)
         create_video_with_text(text, audio_path, video_path)
-        
-        return {
-            "success": True,
-            "video_filename": video_filename,
-            "audio_filename": audio_filename,
-            "video_url": f"/download-video/{video_filename}",
-            "audio_url": f"/download/{audio_filename}"
-        }
+
+        # If only 1 repetition, return the single video
+        if repetitions == 1:
+            return {
+                "success": True,
+                "video_filename": video_filename,
+                "audio_filename": audio_filename,
+                "video_url": f"/download-video/{video_filename}",
+                "audio_url": f"/download/{audio_filename}"
+            }
+
+        # For multiple repetitions, concatenate the video
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+        from moviepy import concatenate_videoclips
+
+        try:
+            # Load the single video
+            single_clip = VideoFileClip(str(video_path))
+
+            # Create list of repeated clips
+            clips = [single_clip] * repetitions
+
+            # Concatenate
+            final_clip = concatenate_videoclips(clips, method="compose")
+
+            # Generate new filename for concatenated video
+            concat_filename = f"repeat_{repetitions}x_{uuid.uuid4()}.mp4"
+            concat_path = VIDEO_DIR / concat_filename
+
+            # Write concatenated video
+            final_clip.write_videofile(
+                str(concat_path),
+                fps=24,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                logger=None
+            )
+
+            # Get duration before closing
+            duration = single_clip.duration * repetitions
+
+            # Clean up
+            single_clip.close()
+            final_clip.close()
+            video_path.unlink()  # Remove single video
+
+            return {
+                "success": True,
+                "filename": concat_filename,
+                "video_url": f"/download-video/{concat_filename}",
+                "audio_url": f"/download/{audio_filename}",
+                "duration": duration,
+                "message": f"Video generated and repeated {repetitions} times"
+            }
+
+        except Exception as e:
+            # If concatenation fails, just return the single video
+            print(f"Concatenation failed: {e}, returning single video")
+            return {
+                "success": True,
+                "video_filename": video_filename,
+                "audio_filename": audio_filename,
+                "video_url": f"/download-video/{video_filename}",
+                "audio_url": f"/download/{audio_filename}",
+                "message": f"Video generated (concatenation failed, showing single video): {str(e)}"
+            }
+
     except Exception as e:
         # Clean up files if error occurs
         if audio_path.exists():
@@ -530,12 +662,25 @@ async def download_video(filename: str):
     filepath = VIDEO_DIR / filename
     if not filepath.exists():
         return {"error": "File not found"}
-    
+
     return FileResponse(
         path=filepath,
         media_type="video/mp4",
         filename=filename
     )
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve the cat logo as favicon"""
+    favicon_path = ASSETS_DIR / "logo_small.png"
+    if not favicon_path.exists():
+        return {"error": "Favicon not found"}
+
+    return FileResponse(
+        path=favicon_path,
+        media_type="image/png"
+    )
+
 
 @app.post("/detect-language")
 async def detect_language(text: str = Form(...)):
