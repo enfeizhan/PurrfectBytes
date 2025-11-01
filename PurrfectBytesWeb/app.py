@@ -85,29 +85,80 @@ async def delete_audio(filename: str):
     return {"error": "File not found"}
 
 def load_font(font_size=48):
-    """Load a TrueType font or fall back to default"""
-    font = None
-    try:
-        font = ImageFont.truetype("/Library/Fonts/Arial Unicode.ttf", font_size)
-    except:
+    """Load a TrueType font or fall back to default - cross-platform support"""
+    import platform
+
+    system = platform.system()
+
+    # Platform-specific font paths
+    if system == "Darwin":  # macOS
+        font_paths = [
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/Avenir.ttc",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+        ]
+    elif system == "Linux":
+        font_paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        ]
+    elif system == "Windows":
+        font_paths = [
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\calibri.ttf",
+            "C:\\Windows\\Fonts\\segoeui.ttf",
+        ]
+    else:
+        font_paths = []
+
+    # Try primary font paths
+    for font_path in font_paths:
         try:
-            # Try some common system fonts
-            for font_path in [
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/Avenir.ttc",
-            ]:
-                try:
-                    font = ImageFont.truetype(font_path, font_size)
-                    break
-                except:
-                    continue
-        except:
-            pass
-    
-    if font is None:
-        font = ImageFont.load_default()
-    
-    return font
+            font = ImageFont.truetype(font_path, font_size)
+            print(f"✓ Loaded font: {font_path} at size {font_size}")
+            return font
+        except (OSError, IOError):
+            continue
+
+    # If no primary fonts found, search system directories
+    if system == "Linux":
+        search_dirs = [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+        ]
+    elif system == "Darwin":
+        search_dirs = [
+            "/Library/Fonts",
+            "/System/Library/Fonts",
+        ]
+    elif system == "Windows":
+        search_dirs = ["C:\\Windows\\Fonts"]
+    else:
+        search_dirs = []
+
+    for search_dir in search_dirs:
+        if not os.path.exists(search_dir):
+            continue
+        try:
+            for root, dirs, files in os.walk(search_dir):
+                for font_file in files:
+                    if font_file.endswith(('.ttf', '.ttc')):
+                        try:
+                            font_path = os.path.join(root, font_file)
+                            font = ImageFont.truetype(font_path, font_size)
+                            print(f"✓ Loaded font: {font_path} at size {font_size}")
+                            return font
+                        except (OSError, IOError):
+                            continue
+        except (OSError, PermissionError):
+            continue
+
+    # Fallback to default (this will be tiny!)
+    print(f"⚠ WARNING: No TrueType fonts found, using default bitmap font (will be very small!)")
+    return ImageFont.load_default()
 
 def is_cjk_character(char):
     """Check if character is Chinese, Japanese, or Korean"""
