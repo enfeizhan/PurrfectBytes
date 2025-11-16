@@ -28,6 +28,11 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 VIDEO_DIR = Path("/tmp/purrfect_bytes/video")
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
+# Assets directory for QR codes and other static assets
+BASE_DIR = Path(__file__).parent
+ASSETS_DIR = BASE_DIR / "assets"
+ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Assets directory for creative files (background, logos)
 ASSETS_DIR = Path("assets")
 
@@ -522,8 +527,8 @@ def analyze_audio_timing(text, audio_path):
             })
         return char_timings
 
-def create_character_animated_video(text, audio_path, output_path, font_size=48):
-    """Create video with character-level highlighting"""
+def create_character_animated_video(text, audio_path, output_path, font_size=48, show_qr_code=False):
+    """Create video with character-level highlighting and optional QR code overlay"""
 
     # Load audio and get duration
     audio = AudioFileClip(str(audio_path))
@@ -551,6 +556,23 @@ def create_character_animated_video(text, audio_path, output_path, font_size=48)
         print(f"✓ Background image loaded successfully! Size: {video_width}x{video_height}")
     except Exception as e:
         print(f"⚠ Background image not found, using solid color background: {e}")
+
+    # Load QR code if enabled
+    qr_code_img = None
+    # Import settings to get QR code configuration
+    from src.config.settings import QR_CODE_CONFIG
+    qr_size = QR_CODE_CONFIG.get("size", 120)
+    qr_margin = QR_CODE_CONFIG.get("margin", 20)
+    qr_opacity = QR_CODE_CONFIG.get("opacity", 0.9)
+    if show_qr_code:
+        try:
+            qr_path = ASSETS_DIR / "paypal_qr.png"
+            qr_img = Image.open(qr_path).convert("RGBA")
+            # Resize QR code to appropriate size
+            qr_code_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+            print(f"✓ QR code loaded successfully! Size: {qr_size}x{qr_size}")
+        except Exception as e:
+            print(f"⚠ QR code image not found: {e}")
 
     # Load cat logo
     cat_logo = None
@@ -656,6 +678,25 @@ def create_character_animated_video(text, audio_path, output_path, font_size=48)
             # Paste cat with transparency
             img.paste(cat_logo, (cat_paste_x, cat_paste_y), cat_logo)
 
+        # Draw QR code overlay in bottom left corner
+        if qr_code_img is not None:
+            # Position: bottom left corner
+            qr_x = qr_margin
+            qr_y = video_height - qr_size - qr_margin
+
+            # Apply opacity by creating a semi-transparent overlay
+            qr_with_opacity = qr_code_img.copy()
+            alpha = qr_with_opacity.split()[3]  # Get alpha channel
+            alpha = alpha.point(lambda p: int(p * qr_opacity))  # Apply configured opacity
+            qr_with_opacity.putalpha(alpha)
+
+            # Paste QR code with transparency
+            img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
+
+            # Debug: print QR position for first frame
+            if t < 0.1:
+                print(f"📱 QR code positioned at ({qr_x}, {qr_y})")
+
         return np.array(img)
     
     # Create video clip from the frame function
@@ -679,9 +720,9 @@ def create_character_animated_video(text, audio_path, output_path, font_size=48)
     video.close()
     audio.close()
 
-def create_video_with_text(text, audio_path, output_path, duration=None, font_size=48):
-    """Main function to create video with character-level text highlighting"""
-    return create_character_animated_video(text, audio_path, output_path, font_size=font_size)
+def create_video_with_text(text, audio_path, output_path, duration=None, font_size=48, show_qr_code=False):
+    """Main function to create video with character-level text highlighting and optional QR code"""
+    return create_character_animated_video(text, audio_path, output_path, font_size=font_size, show_qr_code=show_qr_code)
 
 @app.post("/convert-to-video")
 async def convert_text_to_video(
@@ -689,7 +730,8 @@ async def convert_text_to_video(
     language: str = Form("en"),
     slow: bool = Form(False),
     repetitions: int = Form(1),
-    font_size: int = Form(48)
+    font_size: int = Form(48),
+    show_qr_code: bool = Form(False)
 ):
     if not text:
         return {"error": "No text provided"}
@@ -703,6 +745,7 @@ async def convert_text_to_video(
         font_size = 48
 
     print(f"✓ Received font_size parameter: {font_size}")
+    print(f"✓ QR code overlay: {'enabled' if show_qr_code else 'disabled'}")
 
     # Ensure directories exist (in case they were deleted)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -719,8 +762,8 @@ async def convert_text_to_video(
         tts = gTTS(text=text, lang=language, slow=slow)
         tts.save(str(audio_path))
 
-        # Then create video with text and audio (with cat animation) using custom font size
-        create_video_with_text(text, audio_path, video_path, font_size=font_size)
+        # Then create video with text and audio (with cat animation) using custom font size and QR code overlay
+        create_video_with_text(text, audio_path, video_path, font_size=font_size, show_qr_code=show_qr_code)
 
         # If only 1 repetition, return the single video
         if repetitions == 1:

@@ -9,10 +9,12 @@ BASE_DIR = Path(__file__).parent.parent.parent
 AUDIO_DIR = BASE_DIR / "audio_files"
 VIDEO_DIR = BASE_DIR / "video_files"
 TEMPLATES_DIR = BASE_DIR / "templates"
+ASSETS_DIR = BASE_DIR / "assets"
 
 # Ensure directories exist
 AUDIO_DIR.mkdir(exist_ok=True)
 VIDEO_DIR.mkdir(exist_ok=True)
+ASSETS_DIR.mkdir(exist_ok=True)
 
 # Server settings
 SERVER_HOST = "0.0.0.0"
@@ -125,6 +127,16 @@ CLEANUP_CONFIG = {
     "cleanup_on_startup": True,
 }
 
+# QR Code overlay settings
+QR_CODE_CONFIG = {
+    "default_enabled": False,  # Default: don't show QR code
+    "qr_image_path": ASSETS_DIR / "paypal_qr.png",  # Path to PayPal QR code image
+    "position": "bottom_left",  # Position: bottom_left, bottom_right, top_left, top_right
+    "size": 150,  # QR code size in pixels
+    "margin": 20,  # Margin from edges in pixels
+    "opacity": 0.9,  # Opacity (0.0 to 1.0)
+}
+
 def get_config() -> Dict[str, Any]:
     """Get all configuration as a dictionary."""
     return {
@@ -132,6 +144,7 @@ def get_config() -> Dict[str, Any]:
         "audio_dir": AUDIO_DIR,
         "video_dir": VIDEO_DIR,
         "templates_dir": TEMPLATES_DIR,
+        "assets_dir": ASSETS_DIR,
         "server": {"host": SERVER_HOST, "port": SERVER_PORT, "debug": DEBUG},
         "video": VIDEO_CONFIG,
         "audio": AUDIO_CONFIG,
@@ -141,4 +154,5 @@ def get_config() -> Dict[str, Any]:
         "cjk_ranges": CJK_UNICODE_RANGES,
         "rate_limit": RATE_LIMIT_CONFIG,
         "cleanup": CLEANUP_CONFIG,
+        "qr_code": QR_CODE_CONFIG,
     }

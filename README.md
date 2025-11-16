@@ -39,7 +39,7 @@ cd PurrfectBytes/PurrfectBytesWeb
 uv sync
 
 # Run the application
-uv run uvicorn app:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app:app --reload --host 0.0.0.0 --port 9000
 ```
 
 Visit `http://localhost:8000` to access the web interface.
@@ -205,59 +205,62 @@ You are a YouTube content creator helping generate titles and descriptions for l
 
 Given a target sentence, generate:
 
-1. **TITLE** (following this format):
+1. *TITLE* (following this format - MUST be under 100 characters):
    "My Study Journal: [LANGUAGE] Sentence - "[TARGET_SENTENCE]" | Reading & Pronunciation"
 
-2. **DESCRIPTION** with these sections:
+2. *DESCRIPTION* with these sections:
 
-   📚 **Study Journal Entry**
+   📚 *Study Journal Entry*
    [Brief intro about learning this sentence today]
 
-   📝 **Today's Sentence:**
+   📝 *Today's Sentence:*
    [TARGET_SENTENCE in original language]
    ([Romanization if applicable])
 
-   📖 **English Translation:**
+   📖 *English Translation:*
    "[Translation]"
+   (Skip this section if the language is English)
 
-   🔤 **Breakdown:**
+   🔤 *Breakdown:*
    • [Word/phrase 1] = [meaning]
    • [Word/phrase 2] = [meaning]
    [Continue for key components]
 
-   📚 **Grammar Points:**
+   📚 *Grammar Points:*
    • [Grammar point 1] - [explanation]
    • [Grammar point 2] - [explanation]
    [List important grammar structures]
 
-   🎯 **Perfect for:**
+   🎯 *Perfect for:*
    • [Proficiency level] learners
    • [Learning goal 1]
    • [Learning goal 2]
 
-   💡 **Study Tip:**
+   💡 *Study Tip:*
    [Helpful context or usage note about this sentence]
 
    ---
 
-   📌 **Credit:**
+   📌 *Credit:*
    This sentence is sourced from another creator's content. All credit goes to the original author.
 
-   👍 **Enjoyed this study session?** Please give it a thumbs up!
-   🔔 **Subscribe** to follow my language learning journey and practice together!
+   👍 *Enjoyed this study session?* Please give it a thumbs up!
+   🔔 *Subscribe* to follow my language learning journey and practice together!
+   ☕ *Want to support more learning content?* Scan the QR code (bottom-left corner)—my cat thanks you! 😺
 
    #[LanguageLearning] #[NativeLanguageName] #Learn[Language] #[Language]Language #[NativeStudyHashtag] #[ProficiencyTest] #[Language]Practice #Study[Language] #[Language]Grammar #LanguageLearning
 
 ---
 
-**Instructions:**
+*Instructions:*
 - Identify the language automatically
+- *CRITICAL: Keep the title under 100 characters (strict limit)*
 - Provide accurate romanization (if applicable: Japanese→Romaji, Korean→Romanization, Chinese→Pinyin, etc.)
+- *If the language is English:* Skip the "English Translation" section, but keep the description informative and educational with breakdowns and grammar points
 - Break down the sentence into meaningful components
 - Highlight 2-4 key grammar points
 - Match the proficiency level appropriately (beginner/intermediate/advanced)
 - Use natural, encouraging tone
-- Keep the title under 100 characters
 - Include relevant hashtags for the specific language
 ```
 

@@ -255,6 +255,16 @@
                 </small>
             </div>
 
+            <div class="form-group">
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="showQrCode" name="show_qr_code" checked style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <span>Show PayPal QR Code</span>
+                </label>
+                <small style="color: #666; display: block; margin-top: 5px;">
+                    Display your PayPal QR code in the bottom left corner of the video
+                </small>
+            </div>
+
             <div style="display: flex; gap: 10px;">
                 <button type="submit" id="audioBtn" style="flex: 1;">
                     <span class="button-text">Convert to Audio</span>
@@ -363,12 +373,18 @@
             // Always add repetitions and font_size to form data (endpoint handles it)
             formData.append('repetitions', repetitions);
 
-            // For video conversion, ensure font_size is included
+            // For video conversion, ensure font_size and show_qr_code are included
             if (isVideo) {
                 // Remove existing font_size if any and add the selected value
                 formData.delete('font_size');
                 formData.append('font_size', fontSize);
                 console.log('Sending font_size:', fontSize);
+
+                // Add QR code checkbox value
+                const showQrCode = document.getElementById('showQrCode').checked;
+                formData.delete('show_qr_code');
+                formData.append('show_qr_code', showQrCode ? 'true' : 'false');
+                console.log('Sending show_qr_code:', showQrCode);
             }
 
             try {
