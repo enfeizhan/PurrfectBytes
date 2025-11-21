@@ -724,6 +724,159 @@ def create_video_with_text(text, audio_path, output_path, duration=None, font_si
     """Main function to create video with character-level text highlighting and optional QR code"""
     return create_character_animated_video(text, audio_path, output_path, font_size=font_size, show_qr_code=show_qr_code)
 
+def create_preview_frame(text, font_size=48, show_qr_code=False, highlight_position=0):
+    """Generate a single preview frame showing how the video will look"""
+    from src.config.settings import QR_CODE_CONFIG
+
+    # Video settings
+    video_width = 1280
+    video_height = 720
+    bg_color = (30, 30, 40)
+
+    # Font settings
+    font = load_font(font_size, text=text)
+
+    # Load background image
+    background_img = None
+    try:
+        bg_path = ASSETS_DIR / "background.png"
+        bg_img = Image.open(bg_path).convert("RGB")
+        background_img = bg_img.resize((video_width, video_height), Image.Resampling.LANCZOS)
+    except Exception as e:
+        print(f"⚠ Background image not found: {e}")
+
+    # Load QR code if enabled
+    qr_code_img = None
+    qr_size = QR_CODE_CONFIG.get("size", 120)
+    qr_margin = QR_CODE_CONFIG.get("margin", 20)
+    qr_opacity = QR_CODE_CONFIG.get("opacity", 0.9)
+    if show_qr_code:
+        try:
+            qr_path = ASSETS_DIR / "paypal_qr.png"
+            qr_img = Image.open(qr_path).convert("RGBA")
+            qr_code_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+        except Exception as e:
+            print(f"⚠ QR code image not found: {e}")
+
+    # Load cat logo
+    cat_logo = None
+    cat_size = 80
+    try:
+        logo_path = ASSETS_DIR / "logo_small.png"
+        cat_img = Image.open(logo_path).convert("RGBA")
+        cat_logo = cat_img.resize((cat_size, cat_size), Image.Resampling.LANCZOS)
+    except Exception as e:
+        print(f"⚠ Cat logo not found: {e}")
+
+    # Create image
+    if background_img is not None:
+        img = background_img.copy()
+    else:
+        img = Image.new('RGB', (video_width, video_height), color=bg_color)
+    draw = ImageDraw.Draw(img)
+
+    # Create dummy image for text wrapping
+    dummy_img = Image.new('RGB', (video_width, video_height))
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    lines = wrap_text_for_video(text, video_width, font, dummy_draw)
+
+    # Draw text with highlighting at specified position
+    y_position = (video_height - len(lines) * 70) // 2
+    char_position = 0
+    cat_x = None
+    cat_y = None
+
+    for line in lines:
+        # Calculate line width to center it
+        line_width = 0
+        for char in line:
+            bbox = draw.textbbox((0, 0), char, font=font)
+            line_width += bbox[2] - bbox[0]
+
+        x_position = (video_width - line_width) // 2
+
+        for char in line:
+            # Highlight character at specified position
+            is_active = char_position == highlight_position
+
+            if is_active:
+                color = (255, 255, 255)
+                bbox = draw.textbbox((x_position, y_position), char, font=font)
+                draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
+                             fill=(220, 50, 50))
+
+                if cat_x is None:
+                    char_width = bbox[2] - bbox[0]
+                    cat_x = x_position + char_width // 2
+                    cat_y = y_position
+            else:
+                color = (80, 50, 30)
+
+            if char != ' ' or not is_active:
+                draw.text((x_position, y_position), char, font=font, fill=color)
+
+            bbox = draw.textbbox((0, 0), char, font=font)
+            char_width = bbox[2] - bbox[0]
+            x_position += char_width
+            char_position += 1
+
+        y_position += 70
+
+    # Draw cat logo
+    if cat_logo is not None and cat_x is not None and cat_y is not None:
+        cat_offset_y = cat_size + 10
+        cat_paste_x = int(cat_x - cat_size // 2)
+        cat_paste_y = int(cat_y - cat_offset_y)
+        cat_paste_x = max(0, min(cat_paste_x, video_width - cat_size))
+        cat_paste_y = max(0, min(cat_paste_y, video_height - cat_size))
+        img.paste(cat_logo, (cat_paste_x, cat_paste_y), cat_logo)
+
+    # Draw QR code
+    if qr_code_img is not None:
+        qr_x = qr_margin
+        qr_y = video_height - qr_size - qr_margin
+        qr_with_opacity = qr_code_img.copy()
+        alpha = qr_with_opacity.split()[3]
+        alpha = alpha.point(lambda p: int(p * qr_opacity))
+        qr_with_opacity.putalpha(alpha)
+        img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
+
+    return img
+
+@app.post("/preview")
+async def generate_preview(
+    text: str = Form(...),
+    font_size: int = Form(48),
+    show_qr_code: bool = Form(False),
+    highlight_position: int = Form(0)
+):
+    """Generate a preview frame showing how the video will look"""
+    if not text:
+        return {"error": "No text provided"}
+
+    if font_size < 16 or font_size > 200:
+        font_size = 48
+
+    try:
+        # Generate preview frame
+        preview_img = create_preview_frame(text, font_size, show_qr_code, highlight_position)
+
+        # Save preview to temporary file
+        preview_filename = f"preview_{uuid.uuid4()}.png"
+        preview_path = VIDEO_DIR / preview_filename
+        preview_img.save(str(preview_path), format='PNG')
+
+        return {
+            "success": True,
+            "preview_url": f"/download-video/{preview_filename}",
+            "message": "Preview generated successfully"
+        }
+    except Exception as e:
+        print(f"Error generating preview: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Failed to generate preview: {str(e)}"}
+
 @app.post("/convert-to-video")
 async def convert_text_to_video(
     text: str = Form(...),

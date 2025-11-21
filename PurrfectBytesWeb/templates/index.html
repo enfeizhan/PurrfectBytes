@@ -265,6 +265,21 @@
                 </small>
             </div>
 
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <button type="button" id="previewBtn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <span class="button-text">Preview Video</span>
+                    <div class="spinner"></div>
+                </button>
+            </div>
+
+            <div id="previewContainer" style="display: none; margin-bottom: 20px; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h3 style="margin-top: 0; color: #2c3e50;">Preview</h3>
+                <div id="previewImage" style="text-align: center; margin-bottom: 10px;"></div>
+                <small style="color: #666; display: block;">
+                    ✓ This is how your video will look. Adjust font size if needed, then click "Convert to Video" below.
+                </small>
+            </div>
+
             <div style="display: flex; gap: 10px;">
                 <button type="submit" id="audioBtn" style="flex: 1;">
                     <span class="button-text">Convert to Audio</span>
@@ -469,6 +484,72 @@
                 return;
             }
             handleConversion('/convert-to-video', true);
+        });
+
+        // Preview button handler
+        const previewBtn = document.getElementById('previewBtn');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewImage = document.getElementById('previewImage');
+
+        previewBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            // Show loading state
+            previewBtn.classList.add('loading');
+            previewBtn.disabled = true;
+            previewContainer.style.display = 'none';
+
+            const formData = new FormData(form);
+            const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
+            const showQrCode = document.getElementById('showQrCode').checked;
+
+            formData.delete('font_size');
+            formData.append('font_size', fontSize);
+            formData.delete('show_qr_code');
+            formData.append('show_qr_code', showQrCode ? 'true' : 'false');
+            formData.append('highlight_position', 0);  // Highlight first character
+
+            try {
+                const response = await fetch('/preview', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.preview_url) {
+                    // Show preview image
+                    previewImage.innerHTML = `
+                        <img src="${data.preview_url}" alt="Video Preview" style="max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    `;
+                    previewContainer.style.display = 'block';
+
+                    // Scroll to preview
+                    previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } else {
+                    alert(`Preview failed: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Preview error:', error);
+                alert('Failed to generate preview. Please try again.');
+            } finally {
+                previewBtn.classList.remove('loading');
+                previewBtn.disabled = false;
+            }
+        });
+
+        // Update preview when font size changes
+        const fontSizeSelect = document.getElementById('fontSize');
+        fontSizeSelect.addEventListener('change', function() {
+            // If preview is visible, regenerate it
+            if (previewContainer.style.display !== 'none') {
+                previewBtn.click();
+            }
         });
     </script>
 </body>

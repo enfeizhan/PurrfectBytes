@@ -14,13 +14,16 @@ A comprehensive web application that converts text into audio files and synchron
 
 - **Text-to-Speech**: Convert text to high-quality audio using Google Text-to-Speech (gTTS)
 - **Video Generation**: Create videos with synchronized character highlighting
+- **🆕 Video Preview**: Preview your video before generation to verify text layout, font size, and detect mistakes
 - **🆕 Audio/Video Repetition & Concatenation**: Generate and concatenate content multiple times with perfect highlighting synchronization
 - **Multi-Language Support**: Automatic language detection with 60+ supported languages
 - **CJK Text Handling**: Proper character-based text wrapping for Asian languages
+- **Customizable Font Size**: Adjustable font size (32px-96px) with live preview
+- **PayPal QR Code Overlay**: Configurable donation QR code in video corner
 - **Real-time Processing**: Fast audio and video generation with progress feedback
 - **File Management**: Automatic cleanup of old files with configurable retention
 - **RESTful API**: Complete API endpoints for integration
-- **Web UI**: Intuitive interface with repetition controls
+- **Web UI**: Intuitive interface with preview and repetition controls
 
 ## 🚀 Quick Start
 
@@ -129,6 +132,7 @@ PurrfectBytes/
 - `GET /health` - Health check
 - `POST /detect-language` - Detect text language
 - `POST /convert` - Convert text to audio
+- `POST /preview` - Generate video preview frame
 - `POST /convert-to-video` - Convert text to video
 - `GET /download/{filename}` - Download audio files
 - `GET /download-video/{filename}` - Download video files
