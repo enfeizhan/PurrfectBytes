@@ -1,4 +1,4 @@
-"""Text-to-Speech service using gTTS."""
+"""Text-to-Speech service supporting multiple TTS engines."""
 
 import uuid
 from pathlib import Path
@@ -12,29 +12,47 @@ from src.config.settings import AUDIO_DIR, AUDIO_CONFIG
 from src.utils.text_utils import clean_text_for_tts
 from src.models.schemas import CharacterTiming, AudioAnalysis
 from src.utils.logger import get_logger
+from src.services.tts_engines import (
+    TTSEngine,
+    TTSEngineFactory,
+    BaseTTSEngine,
+    ENGINE_INFO
+)
 
 logger = get_logger(__name__)
 
 class TTSService:
-    """Service for text-to-speech conversion and audio analysis."""
+    """Service for text-to-speech conversion and audio analysis.
     
-    def __init__(self):
+    Supports multiple TTS engines:
+    - gTTS (Google Text-to-Speech) - Simple, reliable, but monotonic
+    - Edge-TTS (Microsoft Edge) - Natural neural voices, best quality
+    - Piper - Fast offline neural TTS
+    - Coqui TTS - Advanced open-source neural TTS
+    """
+    
+    def __init__(self, default_engine: TTSEngine = TTSEngine.GTTS):
         self.audio_dir = AUDIO_DIR
         self.audio_config = AUDIO_CONFIG
+        self.default_engine = default_engine
     
     def generate_audio(
         self, 
         text: str, 
         language: str = "en", 
-        slow: bool = False
+        slow: bool = False,
+        engine: Optional[TTSEngine] = None,
+        voice: Optional[str] = None
     ) -> Tuple[Path, float]:
         """
-        Generate audio file from text.
+        Generate audio file from text using the specified TTS engine.
         
         Args:
             text: Text to convert to speech
             language: Language code for TTS
             slow: Whether to use slow speech speed
+            engine: TTS engine to use (defaults to self.default_engine)
+            voice: Optional specific voice to use (engine-dependent)
             
         Returns:
             Tuple of (audio_file_path, duration_in_seconds)
@@ -48,25 +66,39 @@ class TTSService:
         if not clean_text:
             raise ValueError("No valid text provided for TTS")
         
-        # Generate unique filename
-        audio_filename = f"{uuid.uuid4()}.{self.audio_config['format']}"
-        audio_path = self.audio_dir / audio_filename
+        # Select engine
+        selected_engine = engine or self.default_engine
         
         try:
-            # Generate speech
-            tts = gTTS(text=clean_text, lang=language, slow=slow)
-            tts.save(str(audio_path))
+            # Use the engine factory to get the appropriate engine
+            tts_engine = TTSEngineFactory.get_engine(
+                selected_engine, 
+                self.audio_dir, 
+                self.audio_config['format']
+            )
             
-            # Get audio duration
-            duration = self._get_audio_duration(audio_path)
+            # Check if engine is available
+            if not tts_engine.is_available():
+                logger.warning(f"Engine {selected_engine.value} not available, falling back to gTTS")
+                tts_engine = TTSEngineFactory.get_engine(
+                    TTSEngine.GTTS,
+                    self.audio_dir,
+                    self.audio_config['format']
+                )
             
+            # Generate audio using the selected engine
+            audio_path, duration = tts_engine.generate(
+                text=clean_text,
+                language=language,
+                slow=slow,
+                voice=voice
+            )
+            
+            logger.info(f"Audio generated with {selected_engine.value}: {audio_path.name} ({duration:.2f}s)")
             return audio_path, duration
             
         except Exception as e:
-            # Clean up file if it was created
-            if audio_path.exists():
-                audio_path.unlink()
-            raise Exception(f"Failed to generate audio: {str(e)}")
+            raise Exception(f"Failed to generate audio with {selected_engine.value}: {str(e)}")
     
     def analyze_audio_timing(self, text: str, audio_path: Path) -> AudioAnalysis:
         """
@@ -309,7 +341,9 @@ class TTSService:
         repetitions: int = 10,
         language: str = "en",
         slow: bool = False,
-        output_filename: Optional[str] = None
+        output_filename: Optional[str] = None,
+        engine: Optional[TTSEngine] = None,
+        voice: Optional[str] = None
     ) -> Tuple[Path, float]:
         """
         Generate a single audio file and concatenate it multiple times.
@@ -320,6 +354,8 @@ class TTSService:
             language: Language code for TTS
             slow: Whether to use slow speech speed
             output_filename: Optional output filename for concatenated file
+            engine: TTS engine to use (defaults to self.default_engine)
+            voice: Optional specific voice to use
             
         Returns:
             Tuple of (concatenated_file_path, total_duration)
@@ -330,8 +366,8 @@ class TTSService:
         if repetitions < 1:
             raise ValueError("Repetitions must be at least 1")
         
-        # Generate single audio file
-        audio_path, duration = self.generate_audio(text, language, slow)
+        # Generate single audio file with selected engine
+        audio_path, duration = self.generate_audio(text, language, slow, engine, voice)
         
         try:
             # If only 1 repetition, just return the generated file
@@ -393,3 +429,52 @@ class TTSService:
                 except OSError:
                     pass
             raise Exception(f"Failed to repeat and concatenate audio: {str(e)}")
+    
+    def get_available_engines(self) -> List[dict]:
+        """
+        Get list of available TTS engines.
+        
+        Returns:
+            List of dictionaries with engine info and availability status
+        """
+        return TTSEngineFactory.get_available_engines()
+    
+    def get_engine_voices(self, engine: TTSEngine, language: str = "en") -> List[dict]:
+        """
+        Get available voices for a specific engine and language.
+        
+        Args:
+            engine: TTS engine to query
+            language: Language code
+            
+        Returns:
+            List of available voices
+        """
+        try:
+            tts_engine = TTSEngineFactory.get_engine(
+                engine,
+                self.audio_dir,
+                self.audio_config['format']
+            )
+            return tts_engine.get_available_voices(language)
+        except Exception as e:
+            logger.warning(f"Could not get voices for {engine.value}: {e}")
+            return []
+    
+    @staticmethod
+    def parse_engine(engine_str: Optional[str]) -> Optional[TTSEngine]:
+        """
+        Parse engine string to TTSEngine enum.
+        
+        Args:
+            engine_str: Engine name string (e.g., 'edge', 'gtts')
+            
+        Returns:
+            TTSEngine enum value or None if invalid
+        """
+        if not engine_str:
+            return None
+        try:
+            return TTSEngine(engine_str.lower())
+        except ValueError:
+            return None

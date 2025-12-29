@@ -18,6 +18,7 @@ from src.models.schemas import (
 )
 from src.services.language_detection import LanguageDetectionService
 from src.services.tts_service import TTSService
+from src.services.tts_engines import TTSEngine
 from src.services.video_service import VideoService
 from src.config.settings import AUDIO_DIR, VIDEO_DIR
 from src.utils.logger import get_logger, RequestLogger, log_error
@@ -62,22 +63,50 @@ async def detect_language_endpoint(text: str = Form(...)):
             log_error(logger, e, "language detection")
             raise HTTPException(status_code=500, detail="Language detection failed")
 
+@router.get("/tts-engines")
+async def get_tts_engines():
+    """Get list of available TTS engines."""
+    engines = tts_service.get_available_engines()
+    return {
+        "engines": engines,
+        "default": "gtts"
+    }
+
+@router.get("/tts-voices/{engine}")
+async def get_tts_voices(engine: str, language: str = "en"):
+    """Get available voices for a TTS engine."""
+    try:
+        engine_enum = TTSService.parse_engine(engine)
+        if not engine_enum:
+            raise HTTPException(status_code=400, detail=f"Invalid engine: {engine}")
+        voices = tts_service.get_engine_voices(engine_enum, language)
+        return {"voices": voices, "engine": engine}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/convert", response_model=ConversionResult)
 async def convert_to_audio(
     text: str = Form(...),
     language: str = Form("en"),
-    slow: bool = Form(False)
+    slow: bool = Form(False),
+    engine: str = Form("gtts"),
+    voice: Optional[str] = Form(None)
 ):
-    """Convert text to audio."""
-    with RequestLogger(logger, f"audio conversion ({language})"):
+    """Convert text to audio using the specified TTS engine."""
+    with RequestLogger(logger, f"audio conversion ({language}, engine={engine})"):
         try:
             # Validate language
             if not language_service.is_supported_language(language):
                 language = "en"
                 logger.warning(f"Unsupported language, defaulting to English")
             
-            # Generate audio
-            audio_path, duration = tts_service.generate_audio(text, language, slow)
+            # Parse engine
+            engine_enum = TTSService.parse_engine(engine)
+            
+            # Generate audio with selected engine
+            audio_path, duration = tts_service.generate_audio(
+                text, language, slow, engine=engine_enum, voice=voice
+            )
             
             return ConversionResult(
                 success=True,
@@ -98,10 +127,14 @@ async def convert_to_video(
     text: str = Form(...),
     language: str = Form("en"),
     slow: bool = Form(False),
-    font_size: int = Form(48)
+    font_size: int = Form(48),
+    repetitions: int = Form(1),
+    show_qr_code: bool = Form(False),
+    engine: str = Form("gtts"),
+    voice: Optional[str] = Form(None)
 ):
-    """Convert text to video with synchronized highlighting."""
-    with RequestLogger(logger, f"video conversion ({language}, font_size={font_size})"):
+    """Convert text to video with synchronized highlighting using the specified TTS engine."""
+    with RequestLogger(logger, f"video conversion ({language}, font_size={font_size}, engine={engine}, reps={repetitions})"):
         audio_path = None
         video_path = None
 
@@ -116,38 +149,72 @@ async def convert_to_video(
                 logger.warning(f"Font size {font_size} out of range, using default 48")
                 font_size = 48
 
-            logger.info(f"Received font_size parameter: {font_size}")
+            # Validate repetitions
+            if repetitions < 1 or repetitions > 100:
+                logger.warning(f"Repetitions {repetitions} out of range, using 1")
+                repetitions = 1
 
-            # Generate audio first
-            logger.info("Generating audio for video")
-            audio_path, duration = tts_service.generate_audio(text, language, slow)
+            logger.info(f"Received: font_size={font_size}, repetitions={repetitions}")
+
+            # Parse engine
+            engine_enum = TTSService.parse_engine(engine)
+
+            # Generate audio first with selected engine
+            logger.info(f"Generating audio for video with engine={engine}")
+            audio_path, duration = tts_service.generate_audio(
+                text, language, slow, engine=engine_enum, voice=voice
+            )
 
             # Analyze audio timing
             logger.info("Analyzing audio timing")
             audio_analysis = tts_service.analyze_audio_timing(text, audio_path)
 
-            # Create custom video config with user-specified font size
-            from src.models.schemas import VideoConfig
-            from src.config.settings import VIDEO_CONFIG
-
-            # Calculate proportional sizes
-            bold_size = int(font_size * 1.2)
-            line_height = int(font_size * 1.5)
-
-            logger.info(f"Creating video config: font_size={font_size}, bold={bold_size}, line_height={line_height}")
-
-            custom_config = VideoConfig(
-                **{**VIDEO_CONFIG,
-                   "font_size": font_size,
-                   "font_size_bold": bold_size,
-                   "line_height": line_height
-                }
-            )
-
-            # Generate video with custom config
+            # Use the original app.py video generation function which has proper styling
+            from app import create_video_with_text
+            import uuid as uuid_module
+            from src.config.settings import VIDEO_DIR
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+            from moviepy import concatenate_videoclips
+            
+            # Generate single video
+            single_video_filename = f"{uuid_module.uuid4()}.mp4"
+            single_video_path = VIDEO_DIR / single_video_filename
+            
             logger.info(f"Generating video with character highlighting (font_size={font_size})")
-            custom_video_service = VideoService(config=custom_config)
-            video_path = custom_video_service.generate_video(text, audio_path, audio_analysis)
+            create_video_with_text(text, audio_path, single_video_path, font_size=font_size, show_qr_code=show_qr_code)
+
+            # Handle repetitions
+            if repetitions > 1:
+                try:
+                    logger.info(f"Concatenating video {repetitions} times")
+                    single_clip = VideoFileClip(str(single_video_path))
+                    clips = [single_clip] * repetitions
+                    final_clip = concatenate_videoclips(clips, method="compose")
+                    
+                    concat_filename = f"repeat_{repetitions}x_{uuid_module.uuid4()}.mp4"
+                    video_path = VIDEO_DIR / concat_filename
+                    
+                    final_clip.write_videofile(
+                        str(video_path),
+                        fps=24,
+                        codec='libx264',
+                        audio_codec='aac',
+                        temp_audiofile='temp-audio.m4a',
+                        remove_temp=True,
+                        logger=None
+                    )
+                    
+                    duration = single_clip.duration * repetitions
+                    single_clip.close()
+                    final_clip.close()
+                    single_video_path.unlink()  # Remove single video
+                    
+                    logger.info(f"Concatenated video: {video_path.name}")
+                except Exception as concat_error:
+                    logger.warning(f"Concatenation failed: {concat_error}, using single video")
+                    video_path = single_video_path
+            else:
+                video_path = single_video_path
 
             logger.info(f"Video generated successfully: {video_path.name}")
 
@@ -157,7 +224,8 @@ async def convert_to_video(
                 video_filename=video_path.name,
                 audio_url=f"/download/{audio_path.name}",
                 video_url=f"/download-video/{video_path.name}",
-                duration=duration
+                duration=duration,
+                message=f"Video generated" + (f" and repeated {repetitions} times" if repetitions > 1 else "")
             )
             
         except Exception as e:
@@ -178,6 +246,44 @@ async def convert_to_video(
                 status_code=500,
                 detail=f"Video conversion failed: {str(e)}"
             )
+
+@router.post("/preview")
+async def generate_preview(
+    text: str = Form(...),
+    font_size: int = Form(48),
+    show_qr_code: bool = Form(False),
+    highlight_position: int = Form(0)
+):
+    """Generate a preview frame showing how the video will look."""
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+
+    if font_size < 16 or font_size > 200:
+        font_size = 48
+
+    try:
+        # Use the original app.py preview function
+        from app import create_preview_frame
+        
+        # Generate preview frame
+        preview_img = create_preview_frame(text, font_size, show_qr_code, highlight_position)
+
+        # Save preview to temporary file
+        preview_filename = f"preview_{uuid.uuid4()}.png"
+        preview_path = VIDEO_DIR / preview_filename
+        preview_img.save(str(preview_path), format='PNG')
+
+        return {
+            "success": True,
+            "preview_url": f"/download-video/{preview_filename}",
+            "message": "Preview generated successfully"
+        }
+    except Exception as e:
+        log_error(logger, e, "preview generation")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate preview: {str(e)}"
+        )
 
 @router.get("/download/{filename}")
 async def download_audio(filename: str):
@@ -241,6 +347,19 @@ async def download_video_new(filename: str):
         path=file_path,
         media_type="video/mp4",
         filename=filename
+    )
+
+@router.get("/favicon.ico")
+async def favicon():
+    """Serve the cat logo as favicon."""
+    from src.config.settings import ASSETS_DIR
+    favicon_path = ASSETS_DIR / "logo_small.png"
+    if not favicon_path.exists():
+        raise HTTPException(status_code=404, detail="Favicon not found")
+    
+    return FileResponse(
+        path=favicon_path,
+        media_type="image/png"
     )
 
 @router.delete("/audio/{filename}")
@@ -335,10 +454,12 @@ async def repeat_audio_endpoint(
     text: str = Form(...),
     repetitions: int = Form(10),
     language: str = Form("en"),
-    slow: bool = Form(False)
+    slow: bool = Form(False),
+    engine: str = Form("gtts"),
+    voice: Optional[str] = Form(None)
 ):
-    """Generate audio once and repeat it multiple times."""
-    with RequestLogger(logger, "audio repetition"):
+    """Generate audio once and repeat it multiple times using the specified TTS engine."""
+    with RequestLogger(logger, f"audio repetition (engine={engine})"):
         try:
             # Validate input
             if not text:
@@ -352,12 +473,17 @@ async def repeat_audio_endpoint(
                 language = lang_result.language
                 logger.info(f"Auto-detected language: {language}")
             
-            # Generate and repeat audio
+            # Parse engine
+            engine_enum = TTSService.parse_engine(engine)
+            
+            # Generate and repeat audio with selected engine
             audio_path, total_duration = tts_service.generate_and_repeat(
                 text=text,
                 repetitions=repetitions,
                 language=language,
-                slow=slow
+                slow=slow,
+                engine=engine_enum,
+                voice=voice
             )
             
             filename = audio_path.name
@@ -381,10 +507,12 @@ async def repeat_video_endpoint(
     repetitions: int = Form(10),
     language: str = Form("en"),
     slow: bool = Form(False),
-    font_size: int = Form(48)
+    font_size: int = Form(48),
+    engine: str = Form("gtts"),
+    voice: Optional[str] = Form(None)
 ):
-    """Generate video once and repeat it multiple times."""
-    with RequestLogger(logger, f"video repetition (font_size={font_size})"):
+    """Generate video once and repeat it multiple times using the specified TTS engine."""
+    with RequestLogger(logger, f"video repetition (font_size={font_size}, engine={engine})"):
         try:
             # Validate input
             if not text:
@@ -405,42 +533,63 @@ async def repeat_video_endpoint(
                 language = lang_result.language
                 logger.info(f"Auto-detected language: {language}")
 
-            # Generate single audio and analyze it
+            # Parse engine
+            engine_enum = TTSService.parse_engine(engine)
+
+            # Generate single audio with selected engine and analyze it
             single_audio_path, single_duration = tts_service.generate_audio(
                 text=text,
                 language=language,
-                slow=slow
+                slow=slow,
+                engine=engine_enum,
+                voice=voice
             )
 
             # Analyze the single audio for timing
             audio_analysis = tts_service.analyze_audio_timing(text, single_audio_path)
 
-            # Create custom video config with user-specified font size
-            from src.models.schemas import VideoConfig
-            from src.config.settings import VIDEO_CONFIG
-
-            # Calculate proportional sizes
-            bold_size = int(font_size * 1.2)
-            line_height = int(font_size * 1.5)
-
-            logger.info(f"Repeat-video creating config: font_size={font_size}, bold={bold_size}, line_height={line_height}")
-
-            custom_config = VideoConfig(
-                **{**VIDEO_CONFIG,
-                   "font_size": font_size,
-                   "font_size_bold": bold_size,
-                   "line_height": line_height
-                }
-            )
-
-            # Generate video with custom config and repetitions
-            custom_video_service = VideoService(config=custom_config)
-            video_path = custom_video_service.generate_and_repeat(
-                text=text,
-                single_audio_path=single_audio_path,
-                audio_analysis=audio_analysis,
-                repetitions=repetitions
-            )
+            # Use the original app.py video generation function which has proper styling
+            from app import create_video_with_text
+            import uuid as uuid_module
+            from src.config.settings import VIDEO_DIR
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+            from moviepy import concatenate_videoclips
+            
+            # Generate single video with proper styling
+            single_video_filename = f"{uuid_module.uuid4()}.mp4"
+            single_video_path = VIDEO_DIR / single_video_filename
+            
+            logger.info(f"Generating video with character highlighting (font_size={font_size})")
+            create_video_with_text(text, single_audio_path, single_video_path, font_size=font_size, show_qr_code=True)
+            
+            # If repetitions > 1, concatenate the video
+            if repetitions > 1:
+                try:
+                    single_clip = VideoFileClip(str(single_video_path))
+                    clips = [single_clip] * repetitions
+                    final_clip = concatenate_videoclips(clips, method="compose")
+                    
+                    repeat_filename = f"repeat_{repetitions}x_{uuid_module.uuid4()}.mp4"
+                    video_path = VIDEO_DIR / repeat_filename
+                    
+                    final_clip.write_videofile(
+                        str(video_path),
+                        fps=24,
+                        codec='libx264',
+                        audio_codec='aac',
+                        temp_audiofile='temp-audio.m4a',
+                        remove_temp=True,
+                        logger=None
+                    )
+                    
+                    single_clip.close()
+                    final_clip.close()
+                    single_video_path.unlink()  # Remove single video
+                except Exception as concat_error:
+                    logger.warning(f"Concatenation failed, using single video: {concat_error}")
+                    video_path = single_video_path
+            else:
+                video_path = single_video_path
             
             # Clean up the single audio file (video includes audio)
             try:

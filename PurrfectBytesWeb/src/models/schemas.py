@@ -49,6 +49,7 @@ class ConversionResult(BaseModel):
     video_url: Optional[str] = Field(None, description="Download URL for video") 
     error: Optional[str] = Field(None, description="Error message if conversion failed")
     duration: Optional[float] = Field(None, description="Audio/video duration in seconds")
+    message: Optional[str] = Field(None, description="Status message")
 
 class VideoConfig(BaseModel):
     """Video generation configuration."""

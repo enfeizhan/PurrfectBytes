@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +11,7 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -20,34 +21,34 @@
             justify-content: center;
             padding: 20px;
         }
-        
+
         .container {
             background: white;
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             padding: 40px;
             max-width: 600px;
             width: 100%;
         }
-        
+
         h1 {
             color: #333;
             margin-bottom: 30px;
             text-align: center;
             font-size: 2.5em;
         }
-        
+
         .form-group {
             margin-bottom: 20px;
         }
-        
+
         label {
             display: block;
             margin-bottom: 8px;
             color: #555;
             font-weight: 500;
         }
-        
+
         textarea {
             width: 100%;
             padding: 12px;
@@ -58,12 +59,12 @@
             min-height: 120px;
             transition: border-color 0.3s;
         }
-        
+
         textarea:focus {
             outline: none;
             border-color: #667eea;
         }
-        
+
         select {
             width: 100%;
             padding: 12px;
@@ -74,25 +75,25 @@
             cursor: pointer;
             transition: border-color 0.3s;
         }
-        
+
         select:focus {
             outline: none;
             border-color: #667eea;
         }
-        
+
         .checkbox-group {
             display: flex;
             align-items: center;
             margin-bottom: 20px;
         }
-        
+
         input[type="checkbox"] {
             width: 20px;
             height: 20px;
             margin-right: 10px;
             cursor: pointer;
         }
-        
+
         button {
             width: 100%;
             padding: 14px;
@@ -105,18 +106,18 @@
             cursor: pointer;
             transition: transform 0.2s, box-shadow 0.2s;
         }
-        
+
         button:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
         }
-        
+
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
         }
-        
+
         .result {
             margin-top: 30px;
             padding: 20px;
@@ -124,26 +125,26 @@
             border-radius: 8px;
             display: none;
         }
-        
+
         .result.show {
             display: block;
         }
-        
+
         .success {
             background: #d4edda;
             border: 1px solid #c3e6cb;
         }
-        
+
         .error {
             background: #f8d7da;
             border: 1px solid #f5c6cb;
         }
-        
+
         audio {
             width: 100%;
             margin-top: 15px;
         }
-        
+
         .download-btn {
             display: inline-block;
             margin-top: 15px;
@@ -154,45 +155,48 @@
             border-radius: 5px;
             transition: background 0.3s;
         }
-        
+
         .download-btn:hover {
             background: #218838;
         }
-        
+
         .spinner {
             display: none;
             width: 20px;
             height: 20px;
-            border: 3px solid rgba(255,255,255,0.3);
+            border: 3px solid rgba(255, 255, 255, 0.3);
             border-top-color: white;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto;
         }
-        
+
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
-        
+
         button.loading .button-text {
             display: none;
         }
-        
+
         button.loading .spinner {
             display: block;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>🎵 Text to Speech & Video</h1>
-        
+
         <form id="ttsForm">
             <div class="form-group">
                 <label for="text">Enter your text:</label>
                 <textarea id="text" name="text" placeholder="Type or paste your text here..." required></textarea>
             </div>
-            
+
             <div class="form-group">
                 <label for="language">Language:</label>
                 <div style="display: flex; gap: 10px; align-items: center;">
@@ -217,22 +221,36 @@
                         <option value="no">Norwegian</option>
                         <option value="fi">Finnish</option>
                     </select>
-                    <button type="button" id="autoDetectBtn" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
+                    <button type="button" id="autoDetectBtn"
+                        style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">
                         🔍 Auto-Detect
                     </button>
                 </div>
                 <div id="detectionResult" style="margin-top: 8px; font-size: 12px; color: #666; display: none;"></div>
             </div>
-            
+
+            <div class="form-group">
+                <label for="ttsEngine">TTS Engine:</label>
+                <select id="ttsEngine" name="engine">
+                    <option value="gtts" selected>🔊 Google TTS (gTTS) - Simple, reliable</option>
+                    <option value="edge">🎙️ Microsoft Edge TTS - Natural neural voices (Best quality)</option>
+                    <option value="piper">🔌 Piper - Fast offline neural TTS</option>
+                </select>
+                <small id="engineDescription" style="color: #666; display: block; margin-top: 5px;">
+                    Select a TTS engine. Edge TTS offers the most natural English voices.
+                </small>
+                <div id="engineStatus" style="margin-top: 5px; font-size: 12px;"></div>
+            </div>
+
             <div class="checkbox-group">
                 <input type="checkbox" id="slow" name="slow">
                 <label for="slow">Slow speech speed</label>
             </div>
-            
+
             <div class="form-group">
                 <label for="repetitions">Number of Repetitions (Concatenation):</label>
                 <input type="number" id="repetitions" name="repetitions" min="1" max="100" value="10"
-                       style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;">
+                    style="width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px;">
                 <small style="color: #666; display: block; margin-top: 5px;">
                     Generate and concatenate the text this many times (1 = no concatenation)
                 </small>
@@ -257,7 +275,8 @@
 
             <div class="form-group">
                 <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="showQrCode" name="show_qr_code" checked style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <input type="checkbox" id="showQrCode" name="show_qr_code" checked
+                        style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
                     <span>Show PayPal QR Code</span>
                 </label>
                 <small style="color: #666; display: block; margin-top: 5px;">
@@ -266,13 +285,15 @@
             </div>
 
             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                <button type="button" id="previewBtn" style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <button type="button" id="previewBtn"
+                    style="flex: 1; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                     <span class="button-text">Preview Video</span>
                     <div class="spinner"></div>
                 </button>
             </div>
 
-            <div id="previewContainer" style="display: none; margin-bottom: 20px; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div id="previewContainer"
+                style="display: none; margin-bottom: 20px; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                 <h3 style="margin-top: 0; color: #2c3e50;">Preview</h3>
                 <div id="previewImage" style="text-align: center; margin-bottom: 10px;"></div>
                 <small style="color: #666; display: block;">
@@ -291,10 +312,10 @@
                 </button>
             </div>
         </form>
-        
+
         <div id="result" class="result"></div>
     </div>
-    
+
     <script>
         const form = document.getElementById('ttsForm');
         const resultDiv = document.getElementById('result');
@@ -304,30 +325,97 @@
         const languageSelect = document.getElementById('language');
         const autoDetectBtn = document.getElementById('autoDetectBtn');
         const detectionResult = document.getElementById('detectionResult');
-        
+        const ttsEngineSelect = document.getElementById('ttsEngine');
+        const engineDescription = document.getElementById('engineDescription');
+        const engineStatus = document.getElementById('engineStatus');
+
         let detectionTimeout = null;
-        
+        let availableEngines = {};
+
+        // Engine descriptions
+        const engineDescriptions = {
+            'gtts': 'Simple and reliable, but monotonic voice. Requires internet.',
+            'edge': '✨ Natural neural voices - Best quality for English! Requires internet.',
+            'piper': '⚠️ Requires voice models to be downloaded. See piper docs for setup.'
+        };
+
+        // Check available TTS engines on page load
+        async function checkEngineAvailability() {
+            try {
+                const response = await fetch('/tts-engines');
+                const data = await response.json();
+
+                if (data.engines) {
+                    availableEngines = {};
+                    data.engines.forEach(engine => {
+                        availableEngines[engine.id] = engine.available;
+                    });
+
+                    // Update UI to show availability
+                    updateEngineUI();
+                }
+            } catch (error) {
+                console.error('Failed to check engine availability:', error);
+            }
+        }
+
+        function updateEngineUI() {
+            const options = ttsEngineSelect.options;
+            for (let i = 0; i < options.length; i++) {
+                const engineId = options[i].value;
+                if (availableEngines[engineId] === false) {
+                    options[i].text = options[i].text.replace(/^[✓✗]?\s*/, '✗ ') + ' (Not installed)';
+                    options[i].style.color = '#999';
+                } else if (availableEngines[engineId] === true) {
+                    if (!options[i].text.startsWith('✓')) {
+                        options[i].text = options[i].text.replace(/^[✗]?\s*/, '');
+                    }
+                    options[i].style.color = '';
+                }
+            }
+            updateEngineDescription();
+        }
+
+        function updateEngineDescription() {
+            const selectedEngine = ttsEngineSelect.value;
+            engineDescription.textContent = engineDescriptions[selectedEngine] || '';
+
+            if (availableEngines[selectedEngine] === false) {
+                engineStatus.innerHTML = '<span style="color: #e74c3c;">⚠️ This engine is not installed. Will fall back to gTTS.</span>';
+            } else if (availableEngines[selectedEngine] === true) {
+                engineStatus.innerHTML = '<span style="color: #27ae60;">✓ Engine available</span>';
+            } else {
+                engineStatus.innerHTML = '';
+            }
+        }
+
+        // Listen for engine selection changes
+        ttsEngineSelect.addEventListener('change', updateEngineDescription);
+
+        // Check engines on page load
+        document.addEventListener('DOMContentLoaded', checkEngineAvailability);
+
         async function detectLanguage(text) {
             if (!text || text.trim().length < 3) {
                 detectionResult.style.display = 'none';
                 return;
             }
-            
+
             try {
                 const formData = new FormData();
                 formData.append('text', text);
-                
+
                 const response = await fetch('/detect-language', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.language) {
                     // Update language dropdown
                     languageSelect.value = data.language;
-                    
+
                     // Show detection result
                     detectionResult.innerHTML = `
                         ✓ Detected: <strong>${data.language_name}</strong>
@@ -344,36 +432,36 @@
                 detectionResult.style.color = '#e74c3c';
             }
         }
-        
+
         // Auto-detect on typing (debounced)
-        textArea.addEventListener('input', function() {
+        textArea.addEventListener('input', function () {
             clearTimeout(detectionTimeout);
             const text = this.value;
-            
+
             if (text.trim().length >= 10) {  // Only detect after 10+ characters
                 detectionTimeout = setTimeout(() => {
                     detectLanguage(text);
                 }, 1500); // Wait 1.5 seconds after user stops typing
             }
         });
-        
+
         // Manual detection button
-        autoDetectBtn.addEventListener('click', function() {
+        autoDetectBtn.addEventListener('click', function () {
             const text = textArea.value;
             if (!text.trim()) {
                 alert('Please enter some text first');
                 return;
             }
-            
+
             autoDetectBtn.disabled = true;
             autoDetectBtn.innerHTML = '🔄 Detecting...';
-            
+
             detectLanguage(text).finally(() => {
                 autoDetectBtn.disabled = false;
                 autoDetectBtn.innerHTML = '🔍 Auto-Detect';
             });
         });
-        
+
         async function handleConversion(endpoint, isVideo = false) {
             const button = isVideo ? videoBtn : audioBtn;
             button.classList.add('loading');
@@ -384,9 +472,13 @@
             const formData = new FormData(form);
             const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
             const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
+            const engine = ttsEngineSelect.value;
 
-            // Always add repetitions and font_size to form data (endpoint handles it)
+            // Always add repetitions, engine to form data (endpoint handles it)
             formData.append('repetitions', repetitions);
+            formData.delete('engine');
+            formData.append('engine', engine);
+            console.log('Using TTS engine:', engine);
 
             // For video conversion, ensure font_size and show_qr_code are included
             if (isVideo) {
@@ -407,16 +499,16 @@
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
                     resultDiv.className = 'result success show';
                     if (isVideo) {
                         const videoUrl = data.video_url || data.download_url;
                         const audioUrl = data.audio_url;
                         const isRepeat = repetitions > 1;
-                        
+
                         resultDiv.innerHTML = `
                             <h3>🎬 Video Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
                             ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
@@ -435,9 +527,9 @@
                             </div>
                         `;
                     } else {
-                        const audioUrl = data.download_url;
+                        const audioUrl = data.audio_url || data.download_url;
                         const isRepeat = repetitions > 1;
-                        
+
                         resultDiv.innerHTML = `
                             <h3>✅ Audio Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
                             ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
@@ -471,12 +563,12 @@
                 videoBtn.disabled = false;
             }
         }
-        
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             handleConversion('/convert', false);
         });
-        
+
         videoBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             if (!form.checkValidity()) {
@@ -545,7 +637,7 @@
 
         // Update preview when font size changes
         const fontSizeSelect = document.getElementById('fontSize');
-        fontSizeSelect.addEventListener('change', function() {
+        fontSizeSelect.addEventListener('change', function () {
             // If preview is visible, regenerate it
             if (previewContainer.style.display !== 'none') {
                 previewBtn.click();
@@ -553,4 +645,5 @@
         });
     </script>
 </body>
+
 </html>
