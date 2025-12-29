@@ -69,7 +69,7 @@ async def get_tts_engines():
     engines = tts_service.get_available_engines()
     return {
         "engines": engines,
-        "default": "gtts"
+        "default": "edge"
     }
 
 @router.get("/tts-voices/{engine}")
@@ -89,7 +89,7 @@ async def convert_to_audio(
     text: str = Form(...),
     language: str = Form("en"),
     slow: bool = Form(False),
-    engine: str = Form("gtts"),
+    engine: str = Form("edge"),
     voice: Optional[str] = Form(None)
 ):
     """Convert text to audio using the specified TTS engine."""
@@ -130,7 +130,7 @@ async def convert_to_video(
     font_size: int = Form(48),
     repetitions: int = Form(1),
     show_qr_code: bool = Form(False),
-    engine: str = Form("gtts"),
+    engine: str = Form("edge"),
     voice: Optional[str] = Form(None)
 ):
     """Convert text to video with synchronized highlighting using the specified TTS engine."""
@@ -455,7 +455,7 @@ async def repeat_audio_endpoint(
     repetitions: int = Form(10),
     language: str = Form("en"),
     slow: bool = Form(False),
-    engine: str = Form("gtts"),
+    engine: str = Form("edge"),
     voice: Optional[str] = Form(None)
 ):
     """Generate audio once and repeat it multiple times using the specified TTS engine."""
@@ -508,7 +508,7 @@ async def repeat_video_endpoint(
     language: str = Form("en"),
     slow: bool = Form(False),
     font_size: int = Form(48),
-    engine: str = Form("gtts"),
+    engine: str = Form("edge"),
     voice: Optional[str] = Form(None)
 ):
     """Generate video once and repeat it multiple times using the specified TTS engine."""

@@ -46,7 +46,8 @@ async def home(request: Request):
 async def convert_text_to_speech(
     text: str = Form(...),
     language: str = Form("en"),
-    slow: bool = Form(False)
+    slow: bool = Form(False),
+    engine: str = Form("edge")
 ):
     if not text:
         return {"error": "No text provided"}
@@ -54,19 +55,28 @@ async def convert_text_to_speech(
     # Ensure directories exist (in case they were deleted)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-    filename = f"{uuid.uuid4()}.mp3"
-    filepath = AUDIO_DIR / filename
-    
     try:
-        tts = gTTS(text=text, lang=language, slow=slow)
-        tts.save(str(filepath))
+        # Import TTS service
+        from src.services.tts_service import TTSService
+        tts_service = TTSService()
+        
+        # Parse engine and generate audio
+        engine_enum = TTSService.parse_engine(engine)
+        audio_path, duration = tts_service.generate_audio(
+            text, language, slow, engine=engine_enum
+        )
+        
+        print(f"✓ Audio generated with engine: {engine}")
         
         return {
             "success": True,
-            "filename": filename,
-            "download_url": f"/download/{filename}"
+            "filename": audio_path.name,
+            "audio_url": f"/download/{audio_path.name}",
+            "duration": duration
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
 @app.get("/download/{filename}")
@@ -884,7 +894,8 @@ async def convert_text_to_video(
     slow: bool = Form(False),
     repetitions: int = Form(1),
     font_size: int = Form(48),
-    show_qr_code: bool = Form(False)
+    show_qr_code: bool = Form(False),
+    engine: str = Form("edge")
 ):
     if not text:
         return {"error": "No text provided"}
@@ -899,21 +910,24 @@ async def convert_text_to_video(
 
     print(f"✓ Received font_size parameter: {font_size}")
     print(f"✓ QR code overlay: {'enabled' if show_qr_code else 'disabled'}")
+    print(f"✓ Using TTS engine: {engine}")
 
     # Ensure directories exist (in case they were deleted)
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Generate unique filenames
-    audio_filename = f"{uuid.uuid4()}.mp3"
+    # Generate unique filename for video
     video_filename = f"{uuid.uuid4()}.mp4"
-    audio_path = AUDIO_DIR / audio_filename
     video_path = VIDEO_DIR / video_filename
 
     try:
-        # First create audio
-        tts = gTTS(text=text, lang=language, slow=slow)
-        tts.save(str(audio_path))
+        # Import TTS service and generate audio with selected engine
+        from src.services.tts_service import TTSService
+        tts_service = TTSService()
+        engine_enum = TTSService.parse_engine(engine)
+        audio_path, audio_duration = tts_service.generate_audio(
+            text, language, slow, engine=engine_enum
+        )
 
         # Then create video with text and audio (with cat animation) using custom font size and QR code overlay
         create_video_with_text(text, audio_path, video_path, font_size=font_size, show_qr_code=show_qr_code)
@@ -923,9 +937,9 @@ async def convert_text_to_video(
             return {
                 "success": True,
                 "video_filename": video_filename,
-                "audio_filename": audio_filename,
+                "audio_filename": audio_path.name,
                 "video_url": f"/download-video/{video_filename}",
-                "audio_url": f"/download/{audio_filename}"
+                "audio_url": f"/download/{audio_path.name}"
             }
 
         # For multiple repetitions, concatenate the video
@@ -969,7 +983,7 @@ async def convert_text_to_video(
                 "success": True,
                 "filename": concat_filename,
                 "video_url": f"/download-video/{concat_filename}",
-                "audio_url": f"/download/{audio_filename}",
+                "audio_url": f"/download/{audio_path.name}",
                 "duration": duration,
                 "message": f"Video generated and repeated {repetitions} times"
             }
@@ -980,9 +994,9 @@ async def convert_text_to_video(
             return {
                 "success": True,
                 "video_filename": video_filename,
-                "audio_filename": audio_filename,
+                "audio_filename": audio_path.name,
                 "video_url": f"/download-video/{video_filename}",
-                "audio_url": f"/download/{audio_filename}",
+                "audio_url": f"/download/{audio_path.name}",
                 "message": f"Video generated (concatenation failed, showing single video): {str(e)}"
             }
 
