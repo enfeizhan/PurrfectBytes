@@ -1060,6 +1060,7 @@ async def detect_language(text: str = Form(...)):
         'da': {'name': 'Danish', 'gtts': 'da'},
         'no': {'name': 'Norwegian', 'gtts': 'no'},
         'fi': {'name': 'Finnish', 'gtts': 'fi'},
+        'vi': {'name': 'Vietnamese', 'gtts': 'vi'},
     }
     
     try:

@@ -167,6 +167,7 @@ class EdgeTTSEngine(BaseTTSEngine):
         "da": "da-DK-ChristelNeural",
         "no": "nb-NO-PernilleNeural",
         "fi": "fi-FI-NooraNeural",
+        "vi": "vi-VN-HoaiMyNeural",
     }
     
     def __init__(self, audio_dir: Path, audio_format: str = "mp3"):
