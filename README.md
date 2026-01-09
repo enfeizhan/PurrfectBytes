@@ -215,7 +215,7 @@ IMPORTANT RULES:
 Given a target sentence, generate:
 
 1. *TITLE* (following this format - MUST be under 100 characters):
-   "My Study Journal: [LANGUAGE] Sentence - "[TARGET_SENTENCE]" | Reading & Pronunciation"
+   My Study Journal: [LANGUAGE] Sentence - "[TARGET_SENTENCE]" | Reading & Pronunciation
 
 2. *DESCRIPTION* with these sections:
 
