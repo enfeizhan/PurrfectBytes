@@ -236,6 +236,45 @@ class YouTubeMetadataService:
             if title.startswith(prefix):
                 title = title[len(prefix):].strip()
 
+        # Explicitly reconstruct to guarantee formatting: "My Study Journal: <Language> Sentence - <sentence> | Reading & Pronunciation"
+        import re
+        
+        # 1. Extract Language
+        language = "Language"
+        lang_match = re.search(r'My Study Journal:\s*([a-zA-Z\s]+?)(?:\s*Sentence)?\s*-', title, re.IGNORECASE)
+        if lang_match:
+            language = lang_match.group(1).strip()
+            # Clean up if the optional non-greedy match accidentally kept "Sentence"
+            if language.lower().endswith(" sentence"):
+                language = language[:-9].strip()
+
+        # 2. Extract Target Sentence
+        sentence = "..."
+        sentence_match = re.search(r'"(.*?)"', title)
+        if sentence_match:
+            sentence = sentence_match.group(1).strip()
+        else:
+            # Fallback if the LLM forgot the quotation marks
+            fallback_match = re.search(r'-\s*(.*?)\s*\|', title)
+            if fallback_match:
+                sentence = fallback_match.group(1).strip()
+
+        # 3. Create the exact perfect string parts
+        prefix = f'My Study Journal: {language} Sentence - "'
+        suffix = '" | Reading & Pronunciation'
+
+        # 4. Truncate target sentence safely to guarantee ≤100 chars
+        if len(prefix) + len(sentence) + len(suffix) > 100:
+            allowed_len = 100 - len(prefix) - len(suffix) - 3  # minus 3 for the '...'
+            if allowed_len > 0:
+                sentence = sentence[:allowed_len].strip() + "..."
+                title = f'{prefix}{sentence}{suffix}'
+            else:
+                # Fallback if somehow the language name itself is insanely long
+                title = f'{prefix}{sentence}{suffix}'[:97] + "..."
+        else:
+            title = f'{prefix}{sentence}{suffix}'
+
         return {
             "title": title,
             "description": description,
