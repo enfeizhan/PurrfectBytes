@@ -4,6 +4,16 @@ from pathlib import Path
 from typing import Dict, Any
 import os
 
+# Load .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Allow insecure transport for local development so OAuth over HTTP (localhost) works 
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 # Base directories
 BASE_DIR = Path(__file__).parent.parent.parent
 AUDIO_DIR = BASE_DIR / "audio_files"
@@ -18,8 +28,27 @@ ASSETS_DIR.mkdir(exist_ok=True)
 
 # Server settings
 SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 8000
+SERVER_PORT = 9000
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+# LLM API keys (for YouTube metadata generation)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# YouTube API settings
+YOUTUBE_CLIENT_SECRETS_FILE = os.getenv(
+    "YOUTUBE_CLIENT_SECRETS_FILE",
+    str(BASE_DIR / "client_secrets.json")
+)
+YOUTUBE_TOKEN_FILE = os.getenv(
+    "YOUTUBE_TOKEN_FILE",
+    str(BASE_DIR / "youtube_token.json")
+)
+YOUTUBE_SCOPES = [
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.upload",
+]
 
 # Video generation settings
 VIDEO_CONFIG = {

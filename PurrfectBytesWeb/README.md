@@ -17,7 +17,7 @@ uv sync
 # Run the development server
 uv run uvicorn main:app --reload
 
-# Visit http://localhost:8000
+# Visit http://localhost:9000
 ```
 
 ## ✨ Features
@@ -138,7 +138,7 @@ uv run python concatenate.py audio --file texts.txt
 
 ### Development
 ```bash
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 9000
 ```
 
 ### Production
@@ -156,7 +156,7 @@ FROM python:3.13-slim
 WORKDIR /app
 COPY . .
 RUN pip install uv && uv sync --no-dev
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9000"]
 ```
 
 ## 🤝 Contributing

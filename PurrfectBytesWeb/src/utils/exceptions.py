@@ -25,8 +25,8 @@ class AudioAnalysisError(PurrfectBytesException):
     """Exception raised when audio analysis fails."""
     pass
 
-class FileNotFoundError(PurrfectBytesException):
-    """Exception raised when a required file is not found."""
+class ResourceNotFoundError(PurrfectBytesException):
+    """Exception raised when a required file or resource is not found."""
     pass
 
 class InvalidInputError(PurrfectBytesException):

@@ -42,15 +42,15 @@ cd PurrfectBytes/PurrfectBytesWeb
 uv sync
 
 # Run the application
-uv run uvicorn app:app --reload --host 0.0.0.0 --port 9000
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 9000
 ```
 
-Visit `http://localhost:8000` to access the web interface.
+Visit `http://localhost:9000` to access the web interface.
 
 **Server Options:**
 - `--reload` - Auto-reload on code changes (debug mode)
 - `--host 0.0.0.0` - Accept connections from any IP (use `127.0.0.1` for localhost only)
-- `--port 8000` - Server port (change if 8000 is in use)
+- `--port 9000` - Server port (change if 9000 is in use)
 
 ### Mobile App Setup
 

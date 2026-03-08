@@ -4,6 +4,7 @@ import time
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -74,6 +75,12 @@ def create_app() -> FastAPI:
     
     # Also include routes at root level for backward compatibility
     app.include_router(router)
+    
+    # Mount static files (CSS, JS)
+    from pathlib import Path
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     
     # Setup templates
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))

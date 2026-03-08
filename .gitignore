@@ -89,3 +89,8 @@ PurrfectBytesAndroid/local.properties
 PurrfectBytesAndroid/.idea/
 PurrfectBytesAndroid/*.iml
 PurrfectBytesAndroid/app/*.iml
+
+# Secrets
+*client_secrets.json
+*youtube_token.json
+.env
