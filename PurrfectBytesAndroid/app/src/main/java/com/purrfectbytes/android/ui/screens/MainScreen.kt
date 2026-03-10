@@ -375,6 +375,14 @@ fun MainScreen(
                             }
                         }
                     }
+
+                    uiState.detectedLanguageNotice?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (uiState.isDetectingLanguageError) Color(0xFFE74C3C) else Color(0xFF27AE60)
+                        )
+                    }
                 }
             }
         }

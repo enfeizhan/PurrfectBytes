@@ -12,6 +12,8 @@ import com.purrfectbytes.android.services.YouTubeMetadataGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import java.io.File
 import javax.inject.Inject
 
@@ -59,6 +61,8 @@ class MainViewModel @Inject constructor(
 
     private val _selectedScript = MutableStateFlow(RecognitionScript.AUTO)
     val selectedScript: StateFlow<RecognitionScript> = _selectedScript.asStateFlow()
+    
+    private var languageDetectionJob: Job? = null
 
     val isLoading = ttsService.isLoading
     val currentStatus = ttsService.currentStatus
@@ -71,7 +75,15 @@ class MainViewModel @Inject constructor(
     }
     
     fun updateText(text: String) {
-        _uiState.value = _uiState.value.copy(text = text)
+        _uiState.value = _uiState.value.copy(text = text, detectedLanguageNotice = null)
+        
+        languageDetectionJob?.cancel()
+        if (text.trim().length >= 10) {
+            languageDetectionJob = viewModelScope.launch {
+                delay(1500) // 1.5 seconds debounce
+                autoDetectLanguage(isAuto = true)
+            }
+        }
     }
     
     fun updateLanguage(languageCode: String) {
@@ -272,14 +284,16 @@ class MainViewModel @Inject constructor(
         }
     }
     
-    fun autoDetectLanguage() {
+    fun autoDetectLanguage(isAuto: Boolean = false) {
         val currentState = _uiState.value
         if (currentState.text.isBlank()) {
-            _uiState.value = currentState.copy(errorMessage = "Please enter some text to auto-detect")
+            if (!isAuto) {
+                _uiState.value = currentState.copy(errorMessage = "Please enter some text to detect")
+            }
             return
         }
 
-        _uiState.value = currentState.copy(isDetectingLanguage = true, errorMessage = null)
+        _uiState.value = currentState.copy(isDetectingLanguage = !isAuto, errorMessage = null)
         
         val languageIdentifier = LanguageIdentification.getClient()
         languageIdentifier.identifyLanguage(currentState.text)
@@ -287,7 +301,8 @@ class MainViewModel @Inject constructor(
                 if (languageCode == "und") {
                     _uiState.value = _uiState.value.copy(
                         isDetectingLanguage = false,
-                        errorMessage = "Could not identify the language."
+                        detectedLanguageNotice = "❌ Could not identify language",
+                        isDetectingLanguageError = true
                     )
                 } else {
                     // Try to match the detected language code with supported languages
@@ -301,12 +316,14 @@ class MainViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(
                             isDetectingLanguage = false,
                             selectedLanguage = matchedCode,
-                            successMessage = "Detected Language: $languageName"
+                            detectedLanguageNotice = "✓ Detected: $languageName",
+                            isDetectingLanguageError = false
                         )
                     } else {
                          _uiState.value = _uiState.value.copy(
                             isDetectingLanguage = false,
-                            errorMessage = "Detected language ($languageCode) is not supported for TTS."
+                            detectedLanguageNotice = "❌ Detected unsupported language: $languageCode",
+                            isDetectingLanguageError = true
                         )
                     }
                 }
@@ -314,7 +331,8 @@ class MainViewModel @Inject constructor(
             .addOnFailureListener { e ->
                 _uiState.value = _uiState.value.copy(
                     isDetectingLanguage = false,
-                    errorMessage = "Language detection failed: ${e.message}"
+                    detectedLanguageNotice = "❌ Detection failed: ${e.message}",
+                    isDetectingLanguageError = true
                 )
             }
     }
@@ -431,5 +449,7 @@ data class MainUiState(
     val youtubeTitle: String = "",
     val youtubeDescription: String = "",
     val isUploadingToYouTube: Boolean = false,
-    val isDetectingLanguage: Boolean = false
+    val isDetectingLanguage: Boolean = false,
+    val detectedLanguageNotice: String? = null,
+    val isDetectingLanguageError: Boolean = false
 )
