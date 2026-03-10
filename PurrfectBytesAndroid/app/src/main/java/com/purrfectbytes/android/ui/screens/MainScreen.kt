@@ -318,33 +318,61 @@ fun MainScreen(
                 var expanded by remember { mutableStateOf(false) }
                 val selectedLanguageName = supportedLanguages.find { it.first == uiState.selectedLanguage }?.second ?: "English"
                 
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
-                        value = selectedLanguageName,
-                        onValueChange = { },
-                        readOnly = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        enabled = !isLoading,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
-                    )
-                    
-                    ExposedDropdownMenu(
+                    ExposedDropdownMenuBox(
                         expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        onExpandedChange = { expanded = !expanded },
+                        modifier = Modifier.weight(0.4f)
                     ) {
-                        supportedLanguages.forEach { (code, name) ->
-                            DropdownMenuItem(
-                                text = { Text(name) },
-                                onClick = {
-                                    viewModel.updateLanguage(code)
-                                    expanded = false
-                                }
+                        OutlinedTextField(
+                            value = selectedLanguageName,
+                            onValueChange = { },
+                            readOnly = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            enabled = !isLoading,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+                        )
+                        
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            supportedLanguages.forEach { (code, name) ->
+                                DropdownMenuItem(
+                                    text = { Text(name) },
+                                    onClick = {
+                                        viewModel.updateLanguage(code)
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = { viewModel.autoDetectLanguage() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp), // To match OutlinedTextField height roughly
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF198754)),
+                        enabled = !isLoading && !uiState.isDetectingLanguage && uiState.text.isNotBlank(),
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        if (uiState.isDetectingLanguage) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White
                             )
+                        } else {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Auto-Detect")
                         }
                     }
                 }

@@ -21,6 +21,7 @@ import com.google.api.services.youtube.YouTubeScopes
 import android.accounts.Account
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.google.mlkit.nl.languageid.LanguageIdentification
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -271,6 +272,52 @@ class MainViewModel @Inject constructor(
         }
     }
     
+    fun autoDetectLanguage() {
+        val currentState = _uiState.value
+        if (currentState.text.isBlank()) {
+            _uiState.value = currentState.copy(errorMessage = "Please enter some text to auto-detect")
+            return
+        }
+
+        _uiState.value = currentState.copy(isDetectingLanguage = true, errorMessage = null)
+        
+        val languageIdentifier = LanguageIdentification.getClient()
+        languageIdentifier.identifyLanguage(currentState.text)
+            .addOnSuccessListener { languageCode ->
+                if (languageCode == "und") {
+                    _uiState.value = _uiState.value.copy(
+                        isDetectingLanguage = false,
+                        errorMessage = "Could not identify the language."
+                    )
+                } else {
+                    // Try to match the detected language code with supported languages
+                    val supported = ttsService.getSupportedLanguages()
+                    // ML Kit returns BCP-47 codes like zh-Latn, zh, en, fr
+                    // We match the prefix for simplicity
+                    val matchedCode = supported.find { it.first == languageCode.substringBefore("-") }?.first
+                    
+                    if (matchedCode != null) {
+                        _uiState.value = _uiState.value.copy(
+                            isDetectingLanguage = false,
+                            selectedLanguage = matchedCode,
+                            successMessage = "Language auto-detected successfully!"
+                        )
+                    } else {
+                         _uiState.value = _uiState.value.copy(
+                            isDetectingLanguage = false,
+                            errorMessage = "Detected language ($languageCode) is not supported for TTS."
+                        )
+                    }
+                }
+            }
+            .addOnFailureListener { e ->
+                _uiState.value = _uiState.value.copy(
+                    isDetectingLanguage = false,
+                    errorMessage = "Language detection failed: ${e.message}"
+                )
+            }
+    }
+
     fun playAudio() {
         _generatedAudioFile.value?.let { audioFile ->
             ttsService.playAudio(audioFile)
@@ -382,5 +429,6 @@ data class MainUiState(
     val isGeneratingMetadata: Boolean = false,
     val youtubeTitle: String = "",
     val youtubeDescription: String = "",
-    val isUploadingToYouTube: Boolean = false
+    val isUploadingToYouTube: Boolean = false,
+    val isDetectingLanguage: Boolean = false
 )
