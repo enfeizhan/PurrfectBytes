@@ -41,10 +41,14 @@ class EdgeTTSEngine {
     suspend fun generateAudio(text: String, languageCode: String, isSlow: Boolean, outputFile: File): Result<File> = withContext(Dispatchers.IO) {
         suspendCancellableCoroutine { continuation ->
             try {
+                val connectionId = UUID.randomUUID().toString().replace("-", "")
                 val request = Request.Builder()
-                    .url("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4")
+                    .url("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=$connectionId")
                     .addHeader("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0")
+                    .addHeader("Pragma", "no-cache")
+                    .addHeader("Cache-Control", "no-cache")
+                    .addHeader("Accept-Language", "en-US,en;q=0.9")
                     .build()
 
                 val fos = FileOutputStream(outputFile)
