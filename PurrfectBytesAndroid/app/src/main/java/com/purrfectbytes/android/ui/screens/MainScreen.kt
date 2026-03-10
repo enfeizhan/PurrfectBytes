@@ -112,7 +112,7 @@ fun MainScreen(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Text to Speech Converter (v1.1)",
+                        text = "Text to Speech Converter (v1.2)",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
