@@ -8,17 +8,28 @@ import com.purrfectbytes.android.services.TextRecognitionProcessor
 import com.purrfectbytes.android.services.RecognizedTextBlock
 import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.services.VideoGeneratorService
+import com.purrfectbytes.android.services.YouTubeMetadataGenerator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+import com.purrfectbytes.android.services.YouTubeVideoUploader
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.services.youtube.YouTubeScopes
+import android.accounts.Account
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
+
 @HiltViewModel
 class MainViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val ttsService: TTSService,
     private val textRecognitionProcessor: TextRecognitionProcessor,
-    private val videoGeneratorService: VideoGeneratorService
+    private val videoGeneratorService: VideoGeneratorService,
+    private val youtubeMetadataGenerator: YouTubeMetadataGenerator,
+    private val youtubeVideoUploader: YouTubeVideoUploader
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -118,7 +129,91 @@ class MainViewModel @Inject constructor(
             }
         }
     }
+
+    fun generateMetadata() {
+        val currentState = _uiState.value
+        
+        if (currentState.text.isBlank()) {
+            _uiState.value = currentState.copy(errorMessage = "Please enter some text")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = currentState.copy(isGeneratingMetadata = true, errorMessage = null)
+            try {
+                val (title, description) = youtubeMetadataGenerator.generateMetadata(currentState.text)
+                
+                _uiState.value = _uiState.value.copy(
+                    isGeneratingMetadata = false,
+                    youtubeTitle = title,
+                    youtubeDescription = description,
+                    successMessage = "YouTube Title and Description generated successfully!"
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isGeneratingMetadata = false,
+                    errorMessage = "Failed to generate metadata: ${e.message}"
+                )
+            }
+        }
+    }
     
+    fun updateYoutubeTitle(title: String) {
+        _uiState.value = _uiState.value.copy(youtubeTitle = title)
+    }
+
+    fun updateYoutubeDescription(description: String) {
+        _uiState.value = _uiState.value.copy(youtubeDescription = description)
+    }
+
+    fun uploadToYouTube(accountName: String) {
+        val currentState = _uiState.value
+        val videoFile = _generatedVideoFile.value
+        
+        if (videoFile == null || !videoFile.exists()) {
+            _uiState.value = currentState.copy(errorMessage = "No video available to upload")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = currentState.copy(isUploadingToYouTube = true, errorMessage = null, successMessage = null)
+            
+            try {
+                // Initialize credentials from the signed-in account
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    context,
+                    listOf(YouTubeScopes.YOUTUBE_UPLOAD)
+                )
+                credential.selectedAccount = Account(accountName, "com.google")
+
+                val result = youtubeVideoUploader.uploadVideo(
+                    videoFile = videoFile,
+                    title = currentState.youtubeTitle,
+                    description = currentState.youtubeDescription,
+                    credential = credential
+                )
+
+                result.onSuccess { videoId ->
+                    _uiState.value = _uiState.value.copy(
+                        isUploadingToYouTube = false,
+                        successMessage = "YouTube Upload Successful! Video ID: $videoId"
+                    )
+                }.onFailure { error ->
+                    _uiState.value = _uiState.value.copy(
+                        isUploadingToYouTube = false,
+                        errorMessage = "YouTube Upload Failed: ${error.message}"
+                    )
+                }
+
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isUploadingToYouTube = false,
+                    errorMessage = "Error initiating upload: ${e.message}"
+                )
+            }
+        }
+    }
+
     fun generateNativeVideo() {
         val currentState = _uiState.value
         if (currentState.text.isBlank()) {
@@ -151,7 +246,7 @@ class MainViewModel @Inject constructor(
                             _generatedVideoFile.value = videoFile
                             _uiState.value = _uiState.value.copy(
                                 isConvertingVideo = false,
-                                successMessage = "Native video generated successfully!"
+                                successMessage = "Video generated successfully!"
                             )
                         } else {
                             _uiState.value = _uiState.value.copy(
@@ -283,5 +378,9 @@ data class MainUiState(
     val repetitions: Int = 1,
     val errorMessage: String? = null,
     val successMessage: String? = null,
-    val isConvertingVideo: Boolean = false
+    val isConvertingVideo: Boolean = false,
+    val isGeneratingMetadata: Boolean = false,
+    val youtubeTitle: String = "",
+    val youtubeDescription: String = "",
+    val isUploadingToYouTube: Boolean = false
 )

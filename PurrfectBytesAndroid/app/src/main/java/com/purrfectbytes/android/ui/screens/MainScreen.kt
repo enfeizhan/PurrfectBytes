@@ -27,6 +27,11 @@ import com.purrfectbytes.android.ui.components.PhotoWithTextOverlay
 import com.purrfectbytes.android.ui.components.PrecisePhotoTextOverlay
 import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.viewmodels.MainViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +48,35 @@ fun MainScreen(
     val isAnalyzingPhoto by viewModel.isAnalyzingPhoto.collectAsState()
     val showTextAnalyzer by viewModel.showTextAnalyzer.collectAsState()
     val selectedScript by viewModel.selectedScript.collectAsState()
+
+    // Google Sign-In setup
+    val context = LocalContext.current
+    val signInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            account?.account?.name?.let { accountName ->
+                viewModel.uploadToYouTube(accountName)
+            }
+        } catch (e: ApiException) {
+            // Handle error, maybe show a snackbar (already handled in viewModel mostly)
+            println("Google Sign In Failed: ${e.statusCode}")
+        }
+    }
+
+    val googleSignInClient = remember {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            // In a real app, you would uncomment this and use the Web Client ID
+            // .requestServerAuthCode(BuildConfig.YOUTUBE_CLIENT_ID)
+            .build()
+        GoogleSignIn.getClient(context, gso)
+    }
+
+    // Auto-scroll to bottom of text field when new text is added
+    val scrollState = rememberScrollState()
 
     val supportedLanguages = remember { viewModel.getSupportedLanguages() }
     
@@ -364,7 +398,7 @@ fun MainScreen(
                 } else {
                     Icon(Icons.Default.Movie, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Render MP4 Natively")
+                    Text("Render MP4")
                 }
             }
 
@@ -384,6 +418,66 @@ fun MainScreen(
                     Icon(Icons.Default.VolumeUp, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Play Audio (Local)")
+                }
+            }
+
+            // YouTube Metadata Section
+            OutlinedTextField(
+                value = uiState.youtubeTitle,
+                onValueChange = { viewModel.updateYoutubeTitle(it) },
+                label = { Text("YouTube Title") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            OutlinedTextField(
+                value = uiState.youtubeDescription,
+                onValueChange = { viewModel.updateYoutubeDescription(it) },
+                label = { Text("YouTube Description") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 100.dp),
+                maxLines = 5
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { viewModel.generateMetadata() },
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isGeneratingMetadata && uiState.text.isNotBlank()
+                ) {
+                    if (uiState.isGeneratingMetadata) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Generating...")
+                    } else {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Auto-Fill")
+                    }
+                }
+
+                Button(
+                    onClick = { 
+                        // Start Google Auth flow
+                        signInLauncher.launch(googleSignInClient.signInIntent)
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isUploadingToYouTube && uiState.youtubeTitle.isNotBlank() && uiState.youtubeDescription.isNotBlank() && viewModel.generatedVideoFile.collectAsState().value != null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    if (uiState.isUploadingToYouTube) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Uploading...")
+                    } else {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Upload")
+                    }
                 }
             }
         }
@@ -475,7 +569,7 @@ fun MainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "🎬 Native Video Generated Successfully!",
+                        text = "🎬 Video Generated Successfully!",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
