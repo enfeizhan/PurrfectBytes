@@ -29,6 +29,7 @@ import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.viewmodels.MainViewModel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
@@ -67,7 +68,7 @@ fun MainScreen(
     }
     
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let { viewModel.onPhotoCaptured(it) }
     }
@@ -126,7 +127,7 @@ fun MainScreen(
 
                 Row {
                     IconButton(
-                        onClick = { galleryLauncher.launch("image/*") },
+                        onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
@@ -326,7 +327,7 @@ fun MainScreen(
                     ExposedDropdownMenuBox(
                         expanded = expanded,
                         onExpandedChange = { expanded = !expanded },
-                        modifier = Modifier.weight(0.4f)
+                        modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
                             value = selectedLanguageName,
@@ -358,7 +359,6 @@ fun MainScreen(
                     Button(
                         onClick = { viewModel.autoDetectLanguage() },
                         modifier = Modifier
-                            .weight(1f)
                             .height(56.dp), // To match OutlinedTextField height roughly
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF198754)),
                         enabled = !isLoading && !uiState.isDetectingLanguage && uiState.text.isNotBlank(),
@@ -372,7 +372,7 @@ fun MainScreen(
                         } else {
                             Icon(Icons.Default.Search, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Auto-Detect")
+                            Text("Detect Language")
                         }
                     }
                 }
