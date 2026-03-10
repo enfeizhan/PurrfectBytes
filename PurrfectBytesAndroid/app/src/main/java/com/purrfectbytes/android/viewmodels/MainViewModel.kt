@@ -194,12 +194,33 @@ class MainViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(youtubeDescription = description)
     }
 
-    fun uploadToYouTube(accountName: String) {
+    fun setYouTubeConnected(connected: Boolean, accountName: String? = null) {
+        _uiState.value = _uiState.value.copy(
+            isYouTubeConnected = connected,
+            connectedAccountName = accountName
+        )
+    }
+
+    fun updateYouTubePlaylist(playlist: String) {
+        _uiState.value = _uiState.value.copy(selectedPlaylist = playlist)
+    }
+
+    fun updateYouTubePrivacy(privacy: String) {
+        _uiState.value = _uiState.value.copy(selectedPrivacy = privacy)
+    }
+
+    fun uploadToYouTube() {
         val currentState = _uiState.value
         val videoFile = _generatedVideoFile.value
+        val accountName = currentState.connectedAccountName
         
         if (videoFile == null || !videoFile.exists()) {
             _uiState.value = currentState.copy(errorMessage = "No video available to upload")
+            return
+        }
+        
+        if (accountName == null) {
+            _uiState.value = currentState.copy(errorMessage = "Not connected to YouTube")
             return
         }
 
@@ -484,5 +505,10 @@ data class MainUiState(
     val isUploadingToYouTube: Boolean = false,
     val isDetectingLanguage: Boolean = false,
     val detectedLanguageNotice: String? = null,
-    val isDetectingLanguageError: Boolean = false
+    val isDetectingLanguageError: Boolean = false,
+    val isYouTubeConnected: Boolean = false,
+    val connectedAccountName: String? = null,
+    val selectedPlaylist: String = "",
+    val availablePlaylists: List<String> = listOf("My Videos", "Vlogs", "Tutorials"),
+    val selectedPrivacy: String = "Public"
 )

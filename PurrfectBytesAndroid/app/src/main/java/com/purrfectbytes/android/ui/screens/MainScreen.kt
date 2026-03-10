@@ -59,7 +59,7 @@ fun MainScreen(
         try {
             val account = task.getResult(ApiException::class.java)
             account?.account?.name?.let { accountName ->
-                viewModel.uploadToYouTube(accountName)
+                viewModel.setYouTubeConnected(true, accountName)
             }
         } catch (e: ApiException) {
             // Handle error, maybe show a snackbar (already handled in viewModel mostly)
@@ -549,101 +549,192 @@ fun MainScreen(
                 }
             }
 
-            Button(
-                onClick = { viewModel.generateAudio() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isLoading && uiState.text.isNotBlank() && !uiState.isConvertingVideo
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Generating Audio...")
-                } else {
-                    Icon(Icons.Default.VolumeUp, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Play Audio (Local)")
-                }
             }
 
-            // YouTube Metadata Section
-            OutlinedTextField(
-                value = uiState.youtubeTitle,
-                onValueChange = { viewModel.updateYoutubeTitle(it) },
-                label = { Text("YouTube Title") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            OutlinedTextField(
-                value = uiState.youtubeDescription,
-                onValueChange = { viewModel.updateYoutubeDescription(it) },
-                label = { Text("YouTube Description") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 100.dp),
-                maxLines = 5
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { viewModel.generateMetadata() },
-                    modifier = Modifier.weight(1f),
-                    enabled = !uiState.isGeneratingMetadata && uiState.text.isNotBlank()
-                ) {
-                    if (uiState.isGeneratingMetadata) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Generating...")
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Auto-Fill")
-                    }
-                }
-
-                Button(
-                    onClick = { 
-                        // Start Google Auth flow
-                        signInLauncher.launch(googleSignInClient.signInIntent)
-                    },
-                    modifier = Modifier.weight(1f),
-                    enabled = !uiState.isUploadingToYouTube && uiState.youtubeTitle.isNotBlank() && uiState.youtubeDescription.isNotBlank() && viewModel.generatedVideoFile.collectAsState().value != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                ) {
-                    if (uiState.isUploadingToYouTube) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Uploading...")
-                    } else {
-                        Icon(Icons.Default.CloudUpload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Upload")
-                    }
-                }
-            }
-        }
-        
-        // Status
-        if (currentStatus.isNotBlank()) {
+            // YouTube Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             ) {
-                Text(
-                    text = currentStatus,
+                Column(
                     modifier = Modifier.padding(16.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🚀 Upload to YouTube",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Connection Button
+                    if (uiState.isYouTubeConnected) {
+                        Button(
+                            onClick = { },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
+                            Spacer(Modifier.width(8.dp))
+                            Text("YouTube Connected", color = Color.White)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { signInLauncher.launch(googleSignInClient.signInIntent) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Connect to YouTube")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = uiState.youtubeTitle,
+                        onValueChange = { viewModel.updateYoutubeTitle(it) },
+                        label = { Text("YouTube Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = uiState.youtubeDescription,
+                        onValueChange = { viewModel.updateYoutubeDescription(it) },
+                        label = { Text("YouTube Description") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 100.dp),
+                        maxLines = 5
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { viewModel.generateMetadata() },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !uiState.isGeneratingMetadata && uiState.text.isNotBlank()
+                    ) {
+                        if (uiState.isGeneratingMetadata) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Generating...")
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Auto-Fill Title & Description")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Playlist Dropdown
+                    var playlistExpanded by remember { mutableStateOf(false) }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text("Playlist (optional):", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = playlistExpanded,
+                            onExpandedChange = { playlistExpanded = !playlistExpanded },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = uiState.selectedPlaylist,
+                                onValueChange = { },
+                                readOnly = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = playlistExpanded) },
+                                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = playlistExpanded,
+                                onDismissRequest = { playlistExpanded = false }
+                            ) {
+                                uiState.availablePlaylists.forEach { playlist ->
+                                    DropdownMenuItem(
+                                        text = { Text(playlist) },
+                                        onClick = {
+                                            viewModel.updateYouTubePlaylist(playlist)
+                                            playlistExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Privacy Dropdown
+                    var privacyExpanded by remember { mutableStateOf(false) }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text("Privacy:", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        ExposedDropdownMenuBox(
+                            expanded = privacyExpanded,
+                            onExpandedChange = { privacyExpanded = !privacyExpanded },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = uiState.selectedPrivacy,
+                                onValueChange = { },
+                                readOnly = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                                leadingIcon = { Icon(Icons.Default.Public, contentDescription = null) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = privacyExpanded) },
+                                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = privacyExpanded,
+                                onDismissRequest = { privacyExpanded = false }
+                            ) {
+                                listOf("Public", "Unlisted", "Private").forEach { privacy ->
+                                    DropdownMenuItem(
+                                        text = { Text(privacy) },
+                                        onClick = {
+                                            viewModel.updateYouTubePrivacy(privacy)
+                                            privacyExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Final Upload Button
+                    Button(
+                        onClick = { viewModel.uploadToYouTube() },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = uiState.isYouTubeConnected && !uiState.isUploadingToYouTube && uiState.youtubeTitle.isNotBlank() && uiState.youtubeDescription.isNotBlank() && viewModel.generatedVideoFile.collectAsState().value != null,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66BB6A)) // Green
+                    ) {
+                        if (uiState.isUploadingToYouTube) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Uploading...")
+                        } else {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Upload to YouTube", color = Color.White)
+                        }
+                    }
+                }
             }
         }
         
@@ -702,7 +793,6 @@ fun MainScreen(
         }
         
         val generatedVideoFile by viewModel.generatedVideoFile.collectAsState()
-        val context = LocalContext.current
         
         if (generatedVideoFile != null) {
             Card(
@@ -808,4 +898,3 @@ fun MainScreen(
             }
         }
     }
-}
