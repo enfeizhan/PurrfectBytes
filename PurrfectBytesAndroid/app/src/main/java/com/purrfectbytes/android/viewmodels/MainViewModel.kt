@@ -297,10 +297,11 @@ class MainViewModel @Inject constructor(
                     val matchedCode = supported.find { it.first == languageCode.substringBefore("-") }?.first
                     
                     if (matchedCode != null) {
+                        val languageName = supported.find { it.first == matchedCode }?.second ?: matchedCode
                         _uiState.value = _uiState.value.copy(
                             isDetectingLanguage = false,
                             selectedLanguage = matchedCode,
-                            successMessage = "Language auto-detected successfully!"
+                            successMessage = "Detected Language: $languageName"
                         )
                     } else {
                          _uiState.value = _uiState.value.copy(

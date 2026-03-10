@@ -319,15 +319,35 @@ fun MainScreen(
                 var expanded by remember { mutableStateOf(false) }
                 val selectedLanguageName = supportedLanguages.find { it.first == uiState.selectedLanguage }?.second ?: "English"
                 
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Button(
+                        onClick = { viewModel.autoDetectLanguage() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF198754)),
+                        enabled = !isLoading && !uiState.isDetectingLanguage && uiState.text.isNotBlank(),
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        if (uiState.isDetectingLanguage) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(Icons.Default.FindInPage, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Detect Language")
+                        }
+                    }
+
                     ExposedDropdownMenuBox(
                         expanded = expanded,
                         onExpandedChange = { expanded = !expanded },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
                             value = selectedLanguageName,
@@ -353,26 +373,6 @@ fun MainScreen(
                                     }
                                 )
                             }
-                        }
-                    }
-
-                    Button(
-                        onClick = { viewModel.autoDetectLanguage() },
-                        modifier = Modifier
-                            .height(56.dp), // To match OutlinedTextField height roughly
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF198754)),
-                        enabled = !isLoading && !uiState.isDetectingLanguage && uiState.text.isNotBlank(),
-                        shape = MaterialTheme.shapes.small
-                    ) {
-                        if (uiState.isDetectingLanguage) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White
-                            )
-                        } else {
-                            Icon(Icons.Default.Search, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Detect Language")
                         }
                     }
                 }
