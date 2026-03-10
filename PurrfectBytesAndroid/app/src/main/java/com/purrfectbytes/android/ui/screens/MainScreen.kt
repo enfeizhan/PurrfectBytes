@@ -152,6 +152,52 @@ fun MainScreen(
             }
         }
 
+        // Set OCR Mode
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Text Extraction Mode",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                var ocrExpanded by remember { mutableStateOf(false) }
+                
+                ExposedDropdownMenuBox(
+                    expanded = ocrExpanded,
+                    onExpandedChange = { ocrExpanded = !ocrExpanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = uiState.ocrMode.displayName,
+                        onValueChange = { },
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        enabled = !isLoading,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = ocrExpanded) }
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = ocrExpanded,
+                        onDismissRequest = { ocrExpanded = false }
+                    ) {
+                        com.purrfectbytes.android.viewmodels.OcrMode.values().forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(mode.displayName) },
+                                onClick = {
+                                    viewModel.updateOcrMode(mode)
+                                    ocrExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Captured Photo Display with Text Overlay
         capturedPhotoUri?.let { uri ->
             Card(

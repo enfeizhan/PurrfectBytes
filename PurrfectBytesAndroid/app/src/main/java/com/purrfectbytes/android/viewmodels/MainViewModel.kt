@@ -100,6 +100,10 @@ class MainViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(selectedTtsEngine = engine)
     }
     
+    fun updateOcrMode(mode: OcrMode) {
+        _uiState.value = _uiState.value.copy(ocrMode = mode)
+    }
+    
     fun updateSlowSpeech(isSlow: Boolean) {
         _uiState.value = _uiState.value.copy(isSlowSpeech = isSlow)
     }
@@ -392,7 +396,10 @@ class MainViewModel @Inject constructor(
     private fun analyzePhotoForText(uri: Uri) {
         viewModelScope.launch {
             _isAnalyzingPhoto.value = true
-            _showTextAnalyzer.value = true
+            // Only show analyzer immediately if interactive, otherwise we'll decide later
+            if (_uiState.value.ocrMode == OcrMode.INTERACTIVE) {
+                _showTextAnalyzer.value = true
+            }
 
             textRecognitionProcessor.processImageFromUri(uri, _selectedScript.value).fold(
                 onSuccess = { blocks ->
@@ -400,9 +407,20 @@ class MainViewModel @Inject constructor(
                     _isAnalyzingPhoto.value = false
                     if (blocks.isNotEmpty()) {
                         val scriptInfo = blocks.firstOrNull()?.detectedLanguage ?: "unknown"
-                        _uiState.value = _uiState.value.copy(
-                            successMessage = "Found ${blocks.size} text block(s) using $scriptInfo recognizer!"
-                        )
+                        
+                        if (_uiState.value.ocrMode == OcrMode.AUTO_INSERT) {
+                            val allText = blocks.joinToString("\n") { it.text }
+                            updateText(allText)
+                            _uiState.value = _uiState.value.copy(
+                                successMessage = "Auto extracted ${blocks.size} text block(s) using $scriptInfo recognizer!"
+                            )
+                            clearPhoto() // Dismiss UI on auto insert
+                        } else {
+                            _showTextAnalyzer.value = true
+                            _uiState.value = _uiState.value.copy(
+                                successMessage = "Found ${blocks.size} text block(s) using $scriptInfo recognizer!"
+                            )
+                        }
                     } else {
                         _uiState.value = _uiState.value.copy(
                             errorMessage = "No text detected. Try a different language option."
@@ -445,10 +463,16 @@ class MainViewModel @Inject constructor(
     }
 }
 
+enum class OcrMode(val displayName: String) {
+    INTERACTIVE("Interactive Text Selection (Show boxes)"),
+    AUTO_INSERT("Auto Extract (Insert all text automatically)")
+}
+
 data class MainUiState(
     val text: String = "",
     val selectedLanguage: String = "en",
     val selectedTtsEngine: String = "edge",
+    val ocrMode: OcrMode = OcrMode.INTERACTIVE,
     val isSlowSpeech: Boolean = false,
     val repetitions: Int = 1,
     val errorMessage: String? = null,
