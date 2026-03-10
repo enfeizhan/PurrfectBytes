@@ -7,6 +7,7 @@ import com.purrfectbytes.android.services.TTSService
 import com.purrfectbytes.android.services.TextRecognitionProcessor
 import com.purrfectbytes.android.services.RecognizedTextBlock
 import com.purrfectbytes.android.services.RecognitionScript
+import com.purrfectbytes.android.services.VideoGeneratorService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -16,7 +17,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val ttsService: TTSService,
-    private val textRecognitionProcessor: TextRecognitionProcessor
+    private val textRecognitionProcessor: TextRecognitionProcessor,
+    private val videoGeneratorService: VideoGeneratorService
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -24,6 +26,9 @@ class MainViewModel @Inject constructor(
     
     private val _generatedAudioFile = MutableStateFlow<File?>(null)
     val generatedAudioFile: StateFlow<File?> = _generatedAudioFile.asStateFlow()
+
+    private val _generatedVideoFile = MutableStateFlow<File?>(null)
+    val generatedVideoFile: StateFlow<File?> = _generatedVideoFile.asStateFlow()
 
     private val _capturedPhotoUri = MutableStateFlow<Uri?>(null)
     val capturedPhotoUri: StateFlow<Uri?> = _capturedPhotoUri.asStateFlow()
@@ -109,6 +114,63 @@ class MainViewModel @Inject constructor(
             } catch (e: Exception) {
                 _uiState.value = currentState.copy(
                     errorMessage = "Unexpected error: ${e.message}"
+                )
+            }
+        }
+    }
+    
+    fun generateNativeVideo() {
+        val currentState = _uiState.value
+        if (currentState.text.isBlank()) {
+            _uiState.value = currentState.copy(errorMessage = "Please enter some text")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = currentState.copy(isConvertingVideo = true, errorMessage = null)
+            try {
+                // 1. Generate audio natively
+                val audioResult = ttsService.generateAudio(
+                    text = currentState.text,
+                    languageCode = currentState.selectedLanguage,
+                    isSlow = currentState.isSlowSpeech,
+                    repetitions = currentState.repetitions
+                )
+                
+                audioResult.fold(
+                    onSuccess = { audioFile ->
+                        _generatedAudioFile.value = audioFile
+                        
+                        // 2. Generate video natively using the new audio file
+                        val videoFile = videoGeneratorService.generateVideo(
+                            text = currentState.text,
+                            audioFile = audioFile
+                        )
+                        
+                        if (videoFile != null) {
+                            _generatedVideoFile.value = videoFile
+                            _uiState.value = _uiState.value.copy(
+                                isConvertingVideo = false,
+                                successMessage = "Native video generated successfully!"
+                            )
+                        } else {
+                            _uiState.value = _uiState.value.copy(
+                                isConvertingVideo = false,
+                                errorMessage = "Failed to encode video."
+                            )
+                        }
+                    },
+                    onFailure = { exception ->
+                        _uiState.value = _uiState.value.copy(
+                            isConvertingVideo = false,
+                            errorMessage = "Failed to generate audio for video: ${exception.message}"
+                        )
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isConvertingVideo = false,
+                    errorMessage = "Unexpected error generating video: ${e.message}"
                 )
             }
         }
@@ -220,5 +282,6 @@ data class MainUiState(
     val isSlowSpeech: Boolean = false,
     val repetitions: Int = 1,
     val errorMessage: String? = null,
-    val successMessage: String? = null
+    val successMessage: String? = null,
+    val isConvertingVideo: Boolean = false
 )

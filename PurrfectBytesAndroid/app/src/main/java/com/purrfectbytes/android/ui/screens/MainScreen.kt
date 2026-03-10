@@ -16,6 +16,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import com.purrfectbytes.android.ui.components.PhotoTextAnalyzer
 import com.purrfectbytes.android.ui.components.PhotoWithTextOverlay
 import com.purrfectbytes.android.ui.components.PrecisePhotoTextOverlay
@@ -72,7 +78,7 @@ fun MainScreen(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "Text to Speech Converter",
+                        text = "Text to Speech Converter (v1.1)",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -340,24 +346,45 @@ fun MainScreen(
                 )
             }
         }
-        
-        // Generate Button
-        Button(
-            onClick = { viewModel.generateAudio() },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && uiState.text.isNotBlank()
-        ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Generating...")
-            } else {
-                Icon(Icons.Default.VolumeUp, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Generate Audio")
+        // Action Buttons
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { viewModel.generateNativeVideo() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading && uiState.text.isNotBlank() && !uiState.isConvertingVideo,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                if (uiState.isConvertingVideo) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Rendering Video...")
+                } else {
+                    Icon(Icons.Default.Movie, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Render MP4 Natively")
+                }
+            }
+
+            Button(
+                onClick = { viewModel.generateAudio() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading && uiState.text.isNotBlank() && !uiState.isConvertingVideo
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Generating Audio...")
+                } else {
+                    Icon(Icons.Default.VolumeUp, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Play Audio (Local)")
+                }
             }
         }
         
@@ -429,6 +456,69 @@ fun MainScreen(
                             Text("Stop")
                         }
                     }
+                }
+            }
+        }
+        
+        val generatedVideoFile by viewModel.generatedVideoFile.collectAsState()
+        val context = LocalContext.current
+        
+        if (generatedVideoFile != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "🎬 Native Video Generated Successfully!",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "File saved to device cache",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+                    
+                    DisposableEffect(generatedVideoFile) {
+                        val player = ExoPlayer.Builder(context).build().apply {
+                            setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(generatedVideoFile)))
+                            prepare()
+                            playWhenReady = false
+                        }
+                        exoPlayer = player
+                        
+                        onDispose {
+                            player.release()
+                        }
+                    }
+                    
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = true
+                                setShowNextButton(false)
+                                setShowPreviousButton(false)
+                            }
+                        },
+                        update = { view ->
+                            view.player = exoPlayer
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(9f / 16f)
+                            .clip(MaterialTheme.shapes.medium)
+                    )
                 }
             }
         }
