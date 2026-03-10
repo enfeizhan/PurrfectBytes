@@ -9,6 +9,11 @@ import okio.ByteString
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -38,17 +43,45 @@ class EdgeTTSEngine {
         "fi" to "fi-FI-NoomiNeural"
     )
 
+    private fun generateSecMsGec(): String {
+        var ticks = (System.currentTimeMillis() / 1000.0)
+        ticks += 11644473600L
+        ticks -= ticks % 300
+        ticks *= 1_000_000_000 / 100.0
+        
+        val stringToHash = String.format(Locale.US, "%.0f", ticks) + "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(stringToHash.toByteArray(Charsets.US_ASCII))
+        return hashBytes.joinToString("") { "%02x".format(it) }.uppercase()
+    }
+
+    private fun dateToString(): String {
+        val sdf = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date())
+    }
+
     suspend fun generateAudio(text: String, languageCode: String, isSlow: Boolean, outputFile: File): Result<File> = withContext(Dispatchers.IO) {
         suspendCancellableCoroutine { continuation ->
             try {
-                val connectionId = UUID.randomUUID().toString().replace("-", "")
+                val connectionId = java.util.UUID.randomUUID().toString().replace("-", "")
+                val secMsGec = generateSecMsGec()
+                val muid = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
+                
+                val url = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1" +
+                        "?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4" +
+                        "&ConnectionId=$connectionId" +
+                        "&Sec-MS-GEC=$secMsGec" +
+                        "&Sec-MS-GEC-Version=1-143.0.3650.75"
+
                 val request = Request.Builder()
-                    .url("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=$connectionId")
+                    .url(url)
                     .addHeader("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
                     .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0")
                     .addHeader("Pragma", "no-cache")
                     .addHeader("Cache-Control", "no-cache")
                     .addHeader("Accept-Language", "en-US,en;q=0.9")
+                    .addHeader("Cookie", "muid=$muid;")
                     .build()
 
                 val fos = FileOutputStream(outputFile)
@@ -58,13 +91,14 @@ class EdgeTTSEngine {
                 val listener = object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
                         try {
-                            val config = "Content-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":false,\"wordBoundaryEnabled\":true},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}"
+                            val timestamp = dateToString()
+                            val config = "X-Timestamp:${timestamp}Z\r\nContent-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":false,\"wordBoundaryEnabled\":true},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}"
                             webSocket.send(config)
 
-                            val requestId = UUID.randomUUID().toString().replace("-", "")
+                            val requestId = java.util.UUID.randomUUID().toString().replace("-", "")
                             
                             val ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='$voiceName'><prosody rate='$rate'>$text</prosody></voice></speak>"
-                            val reqMsg = "X-RequestId:$requestId\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n$ssml"
+                            val reqMsg = "X-RequestId:$requestId\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${timestamp}Z\r\nPath:ssml\r\n\r\n$ssml"
                             webSocket.send(reqMsg)
                         } catch (e: Exception) {
                             fos.close()
