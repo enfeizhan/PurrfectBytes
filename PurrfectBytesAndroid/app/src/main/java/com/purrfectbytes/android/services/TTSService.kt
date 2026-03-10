@@ -30,6 +30,8 @@ class TTSService @Inject constructor(
     private var isInitialized = false
     private var mediaPlayer: MediaPlayer? = null
     
+    private val edgeTTSEngine = EdgeTTSEngine()
+    
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
     
@@ -86,10 +88,11 @@ class TTSService @Inject constructor(
         text: String,
         languageCode: String = "en",
         isSlow: Boolean = false,
-        repetitions: Int = 1
+        repetitions: Int = 1,
+        engine: String = "edge"
     ): Result<File> = withContext(Dispatchers.IO) {
         try {
-            if (!isInitialized) {
+            if (engine == "native" && !isInitialized) {
                 val initialized = initialize()
                 if (!initialized) {
                     return@withContext Result.failure(Exception("Failed to initialize TTS"))
@@ -99,25 +102,33 @@ class TTSService @Inject constructor(
             _isLoading.value = true
             _currentStatus.value = "Generating audio..."
             
-            val locale = supportedLanguages[languageCode] ?: Locale.ENGLISH
-            val result = textToSpeech?.setLanguage(locale)
-            
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.w(TAG, "Language $languageCode not supported, falling back to English")
-                textToSpeech?.setLanguage(Locale.ENGLISH)
+            if (engine == "native") {
+                val locale = supportedLanguages[languageCode] ?: Locale.ENGLISH
+                val result = textToSpeech?.setLanguage(locale)
+                
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.w(TAG, "Language $languageCode not supported, falling back to English")
+                    textToSpeech?.setLanguage(Locale.ENGLISH)
+                }
+                
+                // Set speech rate
+                val speechRate = if (isSlow) 0.5f else 1.0f
+                textToSpeech?.setSpeechRate(speechRate)
             }
             
-            // Set speech rate
-            val speechRate = if (isSlow) 0.5f else 1.0f
-            textToSpeech?.setSpeechRate(speechRate)
-            
             // Create output file
-            val fileName = "tts_${System.currentTimeMillis()}.wav"
+            val ext = if (engine == "edge") "mp3" else "wav"
+            val fileName = "tts_${System.currentTimeMillis()}.$ext"
             val outputFile = File(context.getExternalFilesDir(null), fileName)
             
             if (repetitions == 1) {
                 // Single generation
-                val success = generateSingleAudio(text, outputFile)
+                val success = if (engine == "edge") {
+                    edgeTTSEngine.generateAudio(text, languageCode, isSlow, outputFile).isSuccess
+                } else {
+                    generateSingleAudio(text, outputFile)
+                }
+                
                 return@withContext if (success) {
                     Result.success(outputFile)
                 } else {
@@ -125,8 +136,12 @@ class TTSService @Inject constructor(
                 }
             } else {
                 // Multiple repetitions - generate once then repeat
-                val tempFile = File(context.getExternalFilesDir(null), "temp_${System.currentTimeMillis()}.wav")
-                val singleSuccess = generateSingleAudio(text, tempFile)
+                val tempFile = File(context.getExternalFilesDir(null), "temp_${System.currentTimeMillis()}.$ext")
+                val singleSuccess = if (engine == "edge") {
+                    edgeTTSEngine.generateAudio(text, languageCode, isSlow, tempFile).isSuccess
+                } else {
+                    generateSingleAudio(text, tempFile)
+                }
                 
                 if (singleSuccess) {
                     _currentStatus.value = "Creating ${repetitions} repetitions..."

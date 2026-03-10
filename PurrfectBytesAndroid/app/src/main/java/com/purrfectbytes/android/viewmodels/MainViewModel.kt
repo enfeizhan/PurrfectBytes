@@ -67,6 +67,12 @@ class MainViewModel @Inject constructor(
     val isLoading = ttsService.isLoading
     val currentStatus = ttsService.currentStatus
     
+    val supportedLanguages = ttsService.getSupportedLanguages()
+    val supportedTtsEngines = listOf(
+        "edge" to "Microsoft Edge TTS - Natural neural voices (Best quality)",
+        "native" to "Android Native TTS - Offline voices"
+    )
+
     init {
         // Initialize TTS service
         viewModelScope.launch {
@@ -88,6 +94,10 @@ class MainViewModel @Inject constructor(
     
     fun updateLanguage(languageCode: String) {
         _uiState.value = _uiState.value.copy(selectedLanguage = languageCode)
+    }
+    
+    fun updateTtsEngine(engine: String) {
+        _uiState.value = _uiState.value.copy(selectedTtsEngine = engine)
     }
     
     fun updateSlowSpeech(isSlow: Boolean) {
@@ -114,7 +124,8 @@ class MainViewModel @Inject constructor(
                     text = currentState.text,
                     languageCode = currentState.selectedLanguage,
                     isSlow = currentState.isSlowSpeech,
-                    repetitions = currentState.repetitions
+                    repetitions = currentState.repetitions,
+                    engine = currentState.selectedTtsEngine
                 )
                 
                 result.fold(
@@ -242,7 +253,8 @@ class MainViewModel @Inject constructor(
                     text = currentState.text,
                     languageCode = currentState.selectedLanguage,
                     isSlow = currentState.isSlowSpeech,
-                    repetitions = currentState.repetitions
+                    repetitions = currentState.repetitions,
+                    engine = currentState.selectedTtsEngine
                 )
                 
                 audioResult.fold(
@@ -353,10 +365,6 @@ class MainViewModel @Inject constructor(
             successMessage = null
         )
     }
-    
-    fun getSupportedLanguages(): List<Pair<String, String>> {
-        return ttsService.getSupportedLanguages()
-    }
 
     fun openCamera() {
         _showCamera.value = true
@@ -440,6 +448,7 @@ class MainViewModel @Inject constructor(
 data class MainUiState(
     val text: String = "",
     val selectedLanguage: String = "en",
+    val selectedTtsEngine: String = "edge",
     val isSlowSpeech: Boolean = false,
     val repetitions: Int = 1,
     val errorMessage: String? = null,

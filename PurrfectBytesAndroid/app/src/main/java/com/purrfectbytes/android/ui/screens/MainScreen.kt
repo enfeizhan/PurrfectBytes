@@ -85,7 +85,7 @@ fun MainScreen(
     // Auto-scroll to bottom of text field when new text is added
     val scrollState = rememberScrollState()
 
-    val supportedLanguages = remember { viewModel.getSupportedLanguages() }
+    val supportedLanguages = remember { viewModel.supportedLanguages }
     
     Column(
         modifier = modifier
@@ -390,6 +390,52 @@ fun MainScreen(
         // Options
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
+                
+                // TTS Engine Option
+                Text(
+                    text = "TTS Engine",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                var engineExpanded by remember { mutableStateOf(false) }
+                val selectedEngineName = viewModel.supportedTtsEngines.find { it.first == uiState.selectedTtsEngine }?.second ?: "Microsoft Edge TTS - Natural neural voices (Best quality)"
+                
+                ExposedDropdownMenuBox(
+                    expanded = engineExpanded,
+                    onExpandedChange = { engineExpanded = !engineExpanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = selectedEngineName,
+                        onValueChange = { },
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        enabled = !isLoading,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = engineExpanded) }
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = engineExpanded,
+                        onDismissRequest = { engineExpanded = false }
+                    ) {
+                        viewModel.supportedTtsEngines.forEach { (code, name) ->
+                            DropdownMenuItem(
+                                text = { Text(name) },
+                                onClick = {
+                                    viewModel.updateTtsEngine(code)
+                                    engineExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+
                 // Slow Speech Option
                 Row(
                     modifier = Modifier.fillMaxWidth(),
