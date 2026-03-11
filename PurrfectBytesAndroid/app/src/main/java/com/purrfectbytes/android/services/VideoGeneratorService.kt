@@ -66,9 +66,8 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
     }
 
     private fun createTextImage(text: String): File {
-        // Reduced to 720p because older Snapdragon/Android devices don't support 1080p MP4 (MPEG4 part 2) decoding natively.
-        val width = 720
-        val height = 1280
+        val width = 1280
+        val height = 720
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         
@@ -78,14 +77,15 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
         // Paint
         val textPaint = TextPaint().apply {
             color = Color.WHITE
-            textSize = 56f
+            textSize = 72f
             isAntiAlias = true
             textAlign = Paint.Align.LEFT
             typeface = Typeface.DEFAULT_BOLD
         }
         
-        // Text Layout (Centered block)
-        val textWidth = width - 100 // 50 horizontal padding
+        // Text Layout (Centered block) with horizontal padding
+        val horizontalPadding = 120
+        val textWidth = width - horizontalPadding * 2
         val staticLayout = StaticLayout.Builder.obtain(text, 0, text.length, textPaint, textWidth)
             .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setLineSpacing(0f, 1.2f)
@@ -93,7 +93,7 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
             .build()
             
         val textHeight = staticLayout.height
-        val x = 50f // left padding offset
+        val x = horizontalPadding.toFloat()
         val y = (height - textHeight) / 2f // vertical center
         
         canvas.save()

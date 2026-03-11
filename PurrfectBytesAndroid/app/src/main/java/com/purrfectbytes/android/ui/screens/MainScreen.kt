@@ -823,19 +823,35 @@ fun MainScreen(
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = "🎬 Video Generated Successfully!",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "File saved to device cache",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    // Header row with title and dismiss button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "🎬 Video Generated!",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "File saved to device cache",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        IconButton(onClick = { viewModel.dismissVideo() }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss video",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
                     
                     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
                     
@@ -865,7 +881,7 @@ fun MainScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(320.dp)
+                            .aspectRatio(16f / 9f)
                             .clip(MaterialTheme.shapes.medium)
                     )
                 }

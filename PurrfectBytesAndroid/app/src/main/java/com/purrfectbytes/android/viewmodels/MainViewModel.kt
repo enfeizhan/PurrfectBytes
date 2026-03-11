@@ -433,6 +433,10 @@ class MainViewModel @Inject constructor(
         )
     }
 
+    fun dismissVideo() {
+        _generatedVideoFile.value = null
+    }
+
     fun openCamera() {
         _showCamera.value = true
     }
