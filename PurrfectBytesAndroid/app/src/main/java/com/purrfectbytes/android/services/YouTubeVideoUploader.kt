@@ -17,10 +17,9 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
+import com.google.api.client.http.HttpRequestInitializer
 import javax.inject.Inject
 import javax.inject.Singleton
-
-@Singleton
 class YouTubeVideoUploader @Inject constructor(private val context: Context) {
 
     suspend fun uploadVideo(
@@ -28,13 +27,17 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
         title: String,
         description: String,
         playlistId: String? = null,
-        credential: GoogleAccountCredential
+        accessToken: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val transport = NetHttpTransport()
             val jsonFactory = GsonFactory.getDefaultInstance()
 
-            val youtubeService = YouTube.Builder(transport, jsonFactory, credential)
+            val requestInitializer = HttpRequestInitializer { request ->
+                request.headers.authorization = "Bearer $accessToken"
+            }
+
+            val youtubeService = YouTube.Builder(transport, jsonFactory, requestInitializer)
                 .setApplicationName("PurrfectBytes")
                 .build()
 

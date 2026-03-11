@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import java.io.File
 import javax.inject.Inject
 
+import com.purrfectbytes.android.services.YouTubeAuthManager
 import com.purrfectbytes.android.services.YouTubeVideoUploader
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.services.youtube.YouTubeScopes
@@ -43,7 +44,8 @@ class MainViewModel @Inject constructor(
     private val textRecognitionProcessor: TextRecognitionProcessor,
     private val videoGeneratorService: VideoGeneratorService,
     private val youtubeMetadataGenerator: YouTubeMetadataGenerator,
-    private val youtubeVideoUploader: YouTubeVideoUploader
+    private val youtubeVideoUploader: YouTubeVideoUploader,
+    private val youtubeAuthManager: YouTubeAuthManager
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(MainUiState())
@@ -74,17 +76,35 @@ class MainViewModel @Inject constructor(
     fun retryAfterConsent() {
         when (pendingAuthAction) {
             PendingAuthAction.FETCH_CHANNELS -> {
-                val accountName = _uiState.value.connectedAccountName
-                if (accountName != null) fetchYouTubeChannels(accountName)
+                fetchYouTubeChannels()
             }
             PendingAuthAction.FETCH_PLAYLISTS -> {
-                val accountName = _uiState.value.connectedAccountName
                 val channelId = _uiState.value.selectedChannelId
-                if (accountName != null && channelId != null) fetchYouTubePlaylists(accountName, channelId)
+                if (channelId != null) fetchYouTubePlaylists(channelId)
             }
             PendingAuthAction.UPLOAD -> uploadToYouTube()
         }
     }
+    fun startYouTubeAuth(): Intent {
+        return youtubeAuthManager.getAuthIntent()
+    }
+
+    fun handleYouTubeAuthResult(intent: Intent?) {
+        if (intent == null) return
+        viewModelScope.launch {
+            try {
+                val success = youtubeAuthManager.handleAuthResult(intent)
+                if (success) {
+                    setYouTubeConnected(true)
+                } else {
+                    _uiState.value = _uiState.value.copy(errorMessage = "YouTube authentication failed")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = "OAuth error: ${e.message}")
+            }
+        }
+    }
+
     val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
 
     private val _recognizedTextBlocks = MutableStateFlow<List<RecognizedTextBlock>>(emptyList())
@@ -262,12 +282,12 @@ class MainViewModel @Inject constructor(
             }
         }
         // Fetch channels after connecting
-        if (connected && accountName != null) {
-            fetchYouTubeChannels(accountName)
+        if (connected) {
+            fetchYouTubeChannels()
         }
     }
 
-    fun fetchYouTubeChannels(accountName: String) {
+    fun fetchYouTubeChannels() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isFetchingChannels = true,
@@ -276,16 +296,14 @@ class MainViewModel @Inject constructor(
                 selectedChannelName = null
             )
             try {
-                val credential = GoogleAccountCredential.usingOAuth2(
-                    context,
-                    listOf(YouTubeScopes.YOUTUBE_READONLY, YouTubeScopes.YOUTUBE_UPLOAD)
-                )
-                credential.selectedAccount = Account(accountName, "com.google")
-
+                val accessToken = youtubeAuthManager.getFreshAccessToken()
                 val channels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val transport = NetHttpTransport()
                     val jsonFactory = GsonFactory.getDefaultInstance()
-                    val youtubeService = YouTube.Builder(transport, jsonFactory, credential)
+                    val requestInitializer = com.google.api.client.http.HttpRequestInitializer { request ->
+                        request.headers.authorization = "Bearer $accessToken"
+                    }
+                    val youtubeService = YouTube.Builder(transport, jsonFactory, requestInitializer)
                         .setApplicationName("PurrfectBytes")
                         .build()
 
@@ -296,7 +314,6 @@ class MainViewModel @Inject constructor(
 
                     val items = response.items
                     if (items.isNullOrEmpty()) {
-                        println("YouTube API returned no channels for account: $accountName")
                         emptyList()
                     } else {
                         println("YouTube API returned ${items.size} channels")
@@ -313,7 +330,7 @@ class MainViewModel @Inject constructor(
                 if (channels.isEmpty()) {
                     _uiState.value = _uiState.value.copy(
                         isFetchingChannels = false,
-                        successMessage = "Connected as $accountName"
+                        successMessage = "YouTube Connected"
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(
@@ -327,10 +344,6 @@ class MainViewModel @Inject constructor(
                         selectYouTubeChannel(channels[0])
                     }
                 }
-            } catch (e: UserRecoverableAuthIOException) {
-                _uiState.value = _uiState.value.copy(isFetchingChannels = false)
-                pendingAuthAction = PendingAuthAction.FETCH_CHANNELS
-                _youtubeAuthIntent.value = e.intent
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.value = _uiState.value.copy(
@@ -351,26 +364,21 @@ class MainViewModel @Inject constructor(
             selectedPlaylistName = "",
             availablePlaylists = emptyList()
         )
-        val accountName = _uiState.value.connectedAccountName
-        if (accountName != null) {
-            fetchYouTubePlaylists(accountName, channel.id)
-        }
+        fetchYouTubePlaylists(channel.id)
     }
 
-    fun fetchYouTubePlaylists(accountName: String, channelId: String) {
+    fun fetchYouTubePlaylists(channelId: String) {
         _uiState.value = _uiState.value.copy(isFetchingPlaylists = true, errorMessage = null)
         viewModelScope.launch {
             try {
-                val credential = GoogleAccountCredential.usingOAuth2(
-                    context,
-                    listOf(YouTubeScopes.YOUTUBE_READONLY, YouTubeScopes.YOUTUBE_UPLOAD)
-                )
-                credential.selectedAccount = Account(accountName, "com.google")
-
+                val accessToken = youtubeAuthManager.getFreshAccessToken()
                 val playlists = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val transport = NetHttpTransport()
                     val jsonFactory = GsonFactory.getDefaultInstance()
-                    val youtubeService = YouTube.Builder(transport, jsonFactory, credential)
+                    val requestInitializer = com.google.api.client.http.HttpRequestInitializer { request ->
+                        request.headers.authorization = "Bearer $accessToken"
+                    }
+                    val youtubeService = YouTube.Builder(transport, jsonFactory, requestInitializer)
                         .setApplicationName("PurrfectBytes")
                         .build()
 
@@ -397,10 +405,6 @@ class MainViewModel @Inject constructor(
                     isFetchingPlaylists = false,
                     availablePlaylists = playlists
                 )
-            } catch (e: UserRecoverableAuthIOException) {
-                _uiState.value = _uiState.value.copy(isFetchingPlaylists = false)
-                pendingAuthAction = PendingAuthAction.FETCH_PLAYLISTS
-                _youtubeAuthIntent.value = e.intent
             } catch (e: Exception) {
                 e.printStackTrace()
                 _uiState.value = _uiState.value.copy(
@@ -433,14 +437,13 @@ class MainViewModel @Inject constructor(
     fun uploadToYouTube() {
         val currentState = _uiState.value
         val videoFile = _generatedVideoFile.value
-        val accountName = currentState.connectedAccountName
         
         if (videoFile == null || !videoFile.exists()) {
             _uiState.value = currentState.copy(errorMessage = "No video available to upload")
             return
         }
         
-        if (accountName == null) {
+        if (!currentState.isYouTubeConnected) {
             _uiState.value = currentState.copy(errorMessage = "Not connected to YouTube")
             return
         }
@@ -449,19 +452,14 @@ class MainViewModel @Inject constructor(
             _uiState.value = currentState.copy(isUploadingToYouTube = true, errorMessage = null, successMessage = null)
             
             try {
-                // Initialize credentials from the signed-in account
-                val credential = GoogleAccountCredential.usingOAuth2(
-                    context,
-                    listOf(YouTubeScopes.YOUTUBE_UPLOAD)
-                )
-                credential.selectedAccount = Account(accountName, "com.google")
+                val accessToken = youtubeAuthManager.getFreshAccessToken()
 
                 val result = youtubeVideoUploader.uploadVideo(
                     videoFile = videoFile,
                     title = currentState.youtubeTitle,
                     description = currentState.youtubeDescription,
                     playlistId = currentState.selectedPlaylistId,
-                    credential = credential
+                    accessToken = accessToken
                 )
 
                 result.onSuccess { videoId ->
@@ -476,11 +474,6 @@ class MainViewModel @Inject constructor(
                     )
                 }
 
-            } catch (e: UserRecoverableAuthIOException) {
-                // YouTube scope not yet granted — surface the consent Intent to the UI
-                _uiState.value = _uiState.value.copy(isUploadingToYouTube = false)
-                pendingAuthAction = PendingAuthAction.UPLOAD
-                _youtubeAuthIntent.value = e.intent
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isUploadingToYouTube = false,

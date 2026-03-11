@@ -58,43 +58,11 @@ fun MainScreen(
 
     // YouTube OAuth via GoogleAccountCredential
     val context = LocalContext.current
-    val credential = remember {
-        GoogleAccountCredential.usingOAuth2(
-            context,
-            listOf(YouTubeScopes.YOUTUBE_UPLOAD, YouTubeScopes.YOUTUBE_READONLY)
-        )
-    }
-
-    // Launcher for YouTube permission consent screen (triggered by UserRecoverableAuthIOException)
-    val youtubeConsentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        viewModel.consumeYoutubeAuthIntent()
-        if (result.resultCode == Activity.RESULT_OK) {
-            // Permission granted — retry whatever triggered the auth
-            viewModel.retryAfterConsent()
-        }
-    }
-
-    // Auto-launch consent screen whenever the ViewModel emits an auth intent
-    LaunchedEffect(youtubeAuthIntent) {
-        youtubeAuthIntent?.let { intent ->
-            youtubeConsentLauncher.launch(intent)
-        }
-    }
-
-    // Launcher to handle account picker result
+    // Launcher to handle OAuth browser result
     val youtubeAuthLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val accountName = result.data
-                ?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
-            if (accountName != null) {
-                credential.selectedAccountName = accountName
-                viewModel.setYouTubeConnected(true, accountName)
-            }
-        }
+        viewModel.handleYouTubeAuthResult(result.data)
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -776,7 +744,7 @@ fun MainScreen(
                     if (uiState.isYouTubeConnected) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Button(
-                                onClick = { youtubeAuthLauncher.launch(credential.newChooseAccountIntent()) },
+                                onClick = { youtubeAuthLauncher.launch(viewModel.startYouTubeAuth()) },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
                             ) {
@@ -809,7 +777,7 @@ fun MainScreen(
                         }
                     } else {
                         OutlinedButton(
-                            onClick = { youtubeAuthLauncher.launch(credential.newChooseAccountIntent()) },
+                            onClick = { youtubeAuthLauncher.launch(viewModel.startYouTubeAuth()) },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Connect to YouTube")

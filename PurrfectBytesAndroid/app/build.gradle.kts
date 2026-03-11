@@ -19,6 +19,8 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "1.2"
+        
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.purrfectbytes.android"
 
         val localProperties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")
@@ -160,4 +162,5 @@ dependencies {
     implementation("com.google.api-client:google-api-client-android:1.33.0")
     implementation("com.google.apis:google-api-services-youtube:v3-rev222-1.25.0")
     implementation("com.google.http-client:google-http-client-gson:1.42.3")
+    implementation("net.openid:appauth:0.11.1")
 }
