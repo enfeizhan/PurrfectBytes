@@ -20,7 +20,7 @@ android {
         versionCode = 3
         versionName = "1.2"
         
-        manifestPlaceholders["appAuthRedirectScheme"] = "com.purrfectbytes.android"
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.googleusercontent.apps.667110250632-d9rq2oroo43aagg5g48f0mlga49rr0hv"
 
         val localProperties = Properties()
         val localPropertiesFile = rootProject.file("local.properties")

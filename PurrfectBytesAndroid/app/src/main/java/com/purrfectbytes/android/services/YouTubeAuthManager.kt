@@ -26,8 +26,8 @@ class YouTubeAuthManager @Inject constructor(@ApplicationContext private val con
     private val prefs = context.getSharedPreferences("youtube_auth_prefs", Context.MODE_PRIVATE)
 
     companion object {
-        private const val CLIENT_ID = "667110250632-teqi4gkqjcatn526j3imo1g0ufib5jal.apps.googleusercontent.com"
-        private val REDIRECT_URI = Uri.parse("com.purrfectbytes.android:/oauth2redirect")
+        private const val CLIENT_ID = "667110250632-d9rq2oroo43aagg5g48f0mlga49rr0hv.apps.googleusercontent.com"
+        private val REDIRECT_URI = Uri.parse("com.googleusercontent.apps.667110250632-d9rq2oroo43aagg5g48f0mlga49rr0hv:/oauth2redirect")
         private const val AUTH_STATE_KEY = "auth_state"
     }
 
