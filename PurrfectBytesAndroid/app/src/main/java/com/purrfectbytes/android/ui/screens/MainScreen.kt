@@ -1,5 +1,7 @@
 package com.purrfectbytes.android.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -27,6 +29,7 @@ import com.purrfectbytes.android.ui.components.PhotoWithTextOverlay
 import com.purrfectbytes.android.ui.components.PrecisePhotoTextOverlay
 import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.viewmodels.MainViewModel
+import com.purrfectbytes.android.viewmodels.YouTubeChannel
 import android.accounts.Account
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,7 +61,7 @@ fun MainScreen(
     val credential = remember {
         GoogleAccountCredential.usingOAuth2(
             context,
-            listOf(YouTubeScopes.YOUTUBE_UPLOAD)
+            listOf(YouTubeScopes.YOUTUBE_UPLOAD, YouTubeScopes.YOUTUBE_READONLY)
         )
     }
 
@@ -68,8 +71,8 @@ fun MainScreen(
     ) { result ->
         viewModel.consumeYoutubeAuthIntent()
         if (result.resultCode == Activity.RESULT_OK) {
-            // Permission granted — retry the upload
-            viewModel.uploadToYouTube()
+            // Permission granted — retry whatever triggered the auth
+            viewModel.retryAfterConsent()
         }
     }
 
@@ -634,34 +637,45 @@ fun MainScreen(
         }
         
         if (generatedVideoFile != null) {
+            var showVideoDialog by remember { mutableStateOf(false) }
+
+            // Compact card - never blocks scrolling
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Header row with title and dismiss button
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "🎬 Video Generated!",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "🎬 Video Ready!",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = "Tap Play to watch",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { showVideoDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
                             )
-                            Text(
-                                text = "File saved to device cache",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Play")
                         }
                         IconButton(onClick = { viewModel.dismissVideo() }) {
                             Icon(
@@ -671,45 +685,69 @@ fun MainScreen(
                             )
                         }
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-                    
-                    DisposableEffect(generatedVideoFile) {
-                        val player = ExoPlayer.Builder(context).build().apply {
-                            setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(generatedVideoFile)))
-                            prepare()
-                            playWhenReady = false
+            // Full-screen dialog for playback - doesn't affect main scroll
+            if (showVideoDialog) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { showVideoDialog = false },
+                    properties = androidx.compose.ui.window.DialogProperties(
+                        usePlatformDefaultWidth = false
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                    ) {
+                        var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+
+                        DisposableEffect(generatedVideoFile) {
+                            val player = ExoPlayer.Builder(context).build().apply {
+                                setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(generatedVideoFile)))
+                                prepare()
+                                playWhenReady = true
+                            }
+                            exoPlayer = player
+                            onDispose { player.release() }
                         }
-                        exoPlayer = player
-                        
-                        onDispose {
-                            player.release()
+
+                        AndroidView(
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    useController = true
+                                    setShowNextButton(false)
+                                    setShowPreviousButton(false)
+                                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                }
+                            },
+                            update = { view -> view.player = exoPlayer },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.Center)
+                        )
+
+                        IconButton(
+                            onClick = { showVideoDialog = false },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close player",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
                         }
                     }
-                    
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                useController = true
-                                setShowNextButton(false)
-                                setShowPreviousButton(false)
-                            }
-                        },
-                        update = { view ->
-                            view.player = exoPlayer
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(MaterialTheme.shapes.medium)
-                    )
                 }
             }
         }
+
         
-            // YouTube Section
+        // YouTube Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -736,14 +774,38 @@ fun MainScreen(
                     
                     // Connection Button
                     if (uiState.isYouTubeConnected) {
-                        Button(
-                            onClick = { },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
-                            Spacer(Modifier.width(8.dp))
-                            Text("YouTube Connected", color = Color.White)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { youtubeAuthLauncher.launch(credential.newChooseAccountIntent()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                if (uiState.isFetchingChannels) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Fetching channels...", color = Color.White)
+                                } else if (uiState.selectedChannelName != null) {
+                                    Text("Channel: ${uiState.selectedChannelName}", color = Color.White)
+                                } else {
+                                    Text("YouTube Connected", color = Color.White)
+                                }
+                            }
+                            // Show channel selection if there are multiple channels
+                            if (uiState.youtubeChannels.size > 1) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                TextButton(
+                                    onClick = { viewModel.showChannelPickerDialog() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Switch Channel (${uiState.youtubeChannels.size} available)")
+                                }
+                            }
                         }
                     } else {
                         OutlinedButton(
@@ -752,6 +814,54 @@ fun MainScreen(
                         ) {
                             Text("Connect to YouTube")
                         }
+                    }
+
+                    // Channel Picker Dialog
+                    if (uiState.showChannelPicker) {
+                        AlertDialog(
+                            onDismissRequest = { viewModel.dismissChannelPicker() },
+                            title = { Text("Select YouTube Channel") },
+                            text = {
+                                Column {
+                                    uiState.youtubeChannels.forEach { channel ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { viewModel.selectYouTubeChannel(channel) }
+                                                .padding(vertical = 8.dp)
+                                                .let { mod ->
+                                                    if (channel.id == uiState.selectedChannelId)
+                                                        mod.background(
+                                                            MaterialTheme.colorScheme.primaryContainer,
+                                                            MaterialTheme.shapes.small
+                                                        )
+                                                    else mod
+                                                }
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                if (channel.id == uiState.selectedChannelId) Icons.Default.RadioButtonChecked
+                                                else Icons.Default.RadioButtonUnchecked,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = channel.title,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = if (channel.id == uiState.selectedChannelId) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { viewModel.dismissChannelPicker() }) {
+                                    Text("Done")
+                                }
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -807,7 +917,7 @@ fun MainScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             OutlinedTextField(
-                                value = uiState.selectedPlaylist,
+                                value = uiState.selectedPlaylistName,
                                 onValueChange = { },
                                 readOnly = true,
                                 modifier = Modifier
@@ -820,14 +930,26 @@ fun MainScreen(
                                 expanded = playlistExpanded,
                                 onDismissRequest = { playlistExpanded = false }
                             ) {
-                                uiState.availablePlaylists.forEach { playlist ->
+                                if (uiState.isFetchingPlaylists) {
                                     DropdownMenuItem(
-                                        text = { Text(playlist) },
-                                        onClick = {
-                                            viewModel.updateYouTubePlaylist(playlist)
-                                            playlistExpanded = false
-                                        }
+                                        text = { Text("Loading playlists...") },
+                                        onClick = { }
                                     )
+                                } else if (uiState.availablePlaylists.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("No playlists found") },
+                                        onClick = { }
+                                    )
+                                } else {
+                                    uiState.availablePlaylists.forEach { playlist ->
+                                        DropdownMenuItem(
+                                            text = { Text(playlist.title) },
+                                            onClick = {
+                                                viewModel.updateYouTubePlaylist(playlist)
+                                                playlistExpanded = false
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -894,8 +1016,8 @@ fun MainScreen(
                     }
                 }
             }
-        }
         
+
         // Audio Player
         if (generatedAudioFile != null) {
             Card(
@@ -966,7 +1088,7 @@ fun MainScreen(
             }
             
             LaunchedEffect(error) {
-                kotlinx.coroutines.delay(5000)
+                kotlinx.coroutines.delay(15000)
                 viewModel.clearMessages()
             }
         }
@@ -992,4 +1114,5 @@ fun MainScreen(
                 viewModel.clearMessages()
             }
         }
+}
     }

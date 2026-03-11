@@ -121,44 +121,18 @@ class TTSService @Inject constructor(
             val fileName = "tts_${System.currentTimeMillis()}.$ext"
             val outputFile = File(context.getExternalFilesDir(null), fileName)
             
-            if (repetitions == 1) {
-                // Single generation
-                val success = if (engine == "edge") {
-                    edgeTTSEngine.generateAudio(text, languageCode, isSlow, outputFile).isSuccess
-                } else {
-                    generateSingleAudio(text, outputFile)
-                }
-                
-                return@withContext if (success) {
-                    Result.success(outputFile)
-                } else {
-                    Result.failure(Exception("Failed to generate audio"))
-                }
+            // Always generate a single repetition
+            val success = if (engine == "edge") {
+                edgeTTSEngine.generateAudio(text, languageCode, isSlow, outputFile).isSuccess
             } else {
-                // Multiple repetitions - generate once then repeat
-                val tempFile = File(context.getExternalFilesDir(null), "temp_${System.currentTimeMillis()}.$ext")
-                val singleSuccess = if (engine == "edge") {
-                    edgeTTSEngine.generateAudio(text, languageCode, isSlow, tempFile).isSuccess
-                } else {
-                    generateSingleAudio(text, tempFile)
-                }
-                
-                if (singleSuccess) {
-                    _currentStatus.value = "Creating ${repetitions} repetitions..."
-                    val concatenated = concatenateAudio(tempFile, repetitions, outputFile)
-                    tempFile.delete()
-                    
-                    return@withContext if (concatenated) {
-                        Result.success(outputFile)
-                    } else {
-                        Result.failure(Exception("Failed to concatenate audio"))
-                    }
-                } else {
-                    tempFile.delete()
-                    return@withContext Result.failure(Exception("Failed to generate base audio"))
-                }
+                generateSingleAudio(text, outputFile)
             }
             
+            return@withContext if (success) {
+                Result.success(outputFile)
+            } else {
+                Result.failure(Exception("Failed to generate audio"))
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error generating audio", e)
             return@withContext Result.failure(e)

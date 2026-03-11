@@ -20,6 +20,9 @@ import javax.inject.Inject
 import com.purrfectbytes.android.services.YouTubeVideoUploader
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.services.youtube.YouTubeScopes
+import com.google.api.services.youtube.YouTube
+import com.google.api.client.http.javanet.NetHttpTransport
+import com.google.api.client.json.gson.GsonFactory
 import android.accounts.Account
 import android.content.Context
 import android.content.Intent
@@ -63,7 +66,25 @@ class MainViewModel @Inject constructor(
     private val _youtubeAuthIntent = MutableStateFlow<Intent?>(null)
     val youtubeAuthIntent: StateFlow<Intent?> = _youtubeAuthIntent.asStateFlow()
 
+    private enum class PendingAuthAction { UPLOAD, FETCH_CHANNELS, FETCH_PLAYLISTS }
+    private var pendingAuthAction: PendingAuthAction = PendingAuthAction.UPLOAD
+
     fun consumeYoutubeAuthIntent() { _youtubeAuthIntent.value = null }
+
+    fun retryAfterConsent() {
+        when (pendingAuthAction) {
+            PendingAuthAction.FETCH_CHANNELS -> {
+                val accountName = _uiState.value.connectedAccountName
+                if (accountName != null) fetchYouTubeChannels(accountName)
+            }
+            PendingAuthAction.FETCH_PLAYLISTS -> {
+                val accountName = _uiState.value.connectedAccountName
+                val channelId = _uiState.value.selectedChannelId
+                if (accountName != null && channelId != null) fetchYouTubePlaylists(accountName, channelId)
+            }
+            PendingAuthAction.UPLOAD -> uploadToYouTube()
+        }
+    }
     val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
 
     private val _recognizedTextBlocks = MutableStateFlow<List<RecognizedTextBlock>>(emptyList())
@@ -240,10 +261,169 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
+        // Fetch channels after connecting
+        if (connected && accountName != null) {
+            fetchYouTubeChannels(accountName)
+        }
     }
 
-    fun updateYouTubePlaylist(playlist: String) {
-        _uiState.value = _uiState.value.copy(selectedPlaylist = playlist)
+    fun fetchYouTubeChannels(accountName: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isFetchingChannels = true,
+                youtubeChannels = emptyList(),
+                selectedChannelId = null,
+                selectedChannelName = null
+            )
+            try {
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    context,
+                    listOf(YouTubeScopes.YOUTUBE_READONLY, YouTubeScopes.YOUTUBE_UPLOAD)
+                )
+                credential.selectedAccount = Account(accountName, "com.google")
+
+                val channels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val transport = NetHttpTransport()
+                    val jsonFactory = GsonFactory.getDefaultInstance()
+                    val youtubeService = YouTube.Builder(transport, jsonFactory, credential)
+                        .setApplicationName("PurrfectBytes")
+                        .build()
+
+                    val response = youtubeService.channels()
+                        .list("snippet")
+                        .setMine(true)
+                        .execute()
+
+                    val items = response.items
+                    if (items.isNullOrEmpty()) {
+                        println("YouTube API returned no channels for account: $accountName")
+                        emptyList()
+                    } else {
+                        println("YouTube API returned ${items.size} channels")
+                        items.map { ch ->
+                            YouTubeChannel(
+                                id = ch.id ?: "",
+                                title = ch.snippet?.title ?: "Unknown Channel",
+                                thumbnailUrl = try { ch.snippet?.thumbnails?.get("default")?.let { (it as? com.google.api.services.youtube.model.Thumbnail)?.url } } catch (_: Exception) { null }
+                            )
+                        }
+                    }
+                }
+
+                if (channels.isEmpty()) {
+                    _uiState.value = _uiState.value.copy(
+                        isFetchingChannels = false,
+                        successMessage = "Connected as $accountName"
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isFetchingChannels = false,
+                        youtubeChannels = channels,
+                        showChannelPicker = channels.size > 1
+                    )
+
+                    // Auto-select if there's only one channel
+                    if (channels.size == 1) {
+                        selectYouTubeChannel(channels[0])
+                    }
+                }
+            } catch (e: UserRecoverableAuthIOException) {
+                _uiState.value = _uiState.value.copy(isFetchingChannels = false)
+                pendingAuthAction = PendingAuthAction.FETCH_CHANNELS
+                _youtubeAuthIntent.value = e.intent
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.value = _uiState.value.copy(
+                    isFetchingChannels = false,
+                    errorMessage = "Failed to fetch channels: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun selectYouTubeChannel(channel: YouTubeChannel) {
+        _uiState.value = _uiState.value.copy(
+            selectedChannelId = channel.id,
+            selectedChannelName = channel.title,
+            showChannelPicker = false,
+            // Reset playlist when channel changes
+            selectedPlaylistId = null,
+            selectedPlaylistName = "",
+            availablePlaylists = emptyList()
+        )
+        val accountName = _uiState.value.connectedAccountName
+        if (accountName != null) {
+            fetchYouTubePlaylists(accountName, channel.id)
+        }
+    }
+
+    fun fetchYouTubePlaylists(accountName: String, channelId: String) {
+        _uiState.value = _uiState.value.copy(isFetchingPlaylists = true, errorMessage = null)
+        viewModelScope.launch {
+            try {
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    context,
+                    listOf(YouTubeScopes.YOUTUBE_READONLY, YouTubeScopes.YOUTUBE_UPLOAD)
+                )
+                credential.selectedAccount = Account(accountName, "com.google")
+
+                val playlists = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val transport = NetHttpTransport()
+                    val jsonFactory = GsonFactory.getDefaultInstance()
+                    val youtubeService = YouTube.Builder(transport, jsonFactory, credential)
+                        .setApplicationName("PurrfectBytes")
+                        .build()
+
+                    val response = youtubeService.playlists()
+                        .list("snippet")
+                        .setMine(true) // Native Android OAuth binds to the main identity, so we use mine=true
+                        .setMaxResults(50L)
+                        .execute()
+
+                    val items = response.items
+                    if (items.isNullOrEmpty()) {
+                        emptyList()
+                    } else {
+                        items.map { pl ->
+                            YouTubePlaylist(
+                                id = pl.id ?: "",
+                                title = pl.snippet?.title ?: "Unknown Playlist"
+                            )
+                        }
+                    }
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    isFetchingPlaylists = false,
+                    availablePlaylists = playlists
+                )
+            } catch (e: UserRecoverableAuthIOException) {
+                _uiState.value = _uiState.value.copy(isFetchingPlaylists = false)
+                pendingAuthAction = PendingAuthAction.FETCH_PLAYLISTS
+                _youtubeAuthIntent.value = e.intent
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.value = _uiState.value.copy(
+                    isFetchingPlaylists = false,
+                    errorMessage = "Failed to fetch playlists: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun dismissChannelPicker() {
+        _uiState.value = _uiState.value.copy(showChannelPicker = false)
+    }
+
+    fun showChannelPickerDialog() {
+        _uiState.value = _uiState.value.copy(showChannelPicker = true)
+    }
+
+    fun updateYouTubePlaylist(playlist: YouTubePlaylist) {
+        _uiState.value = _uiState.value.copy(
+            selectedPlaylistId = playlist.id,
+            selectedPlaylistName = playlist.title
+        )
     }
 
     fun updateYouTubePrivacy(privacy: String) {
@@ -280,6 +460,7 @@ class MainViewModel @Inject constructor(
                     videoFile = videoFile,
                     title = currentState.youtubeTitle,
                     description = currentState.youtubeDescription,
+                    playlistId = currentState.selectedPlaylistId,
                     credential = credential
                 )
 
@@ -298,6 +479,7 @@ class MainViewModel @Inject constructor(
             } catch (e: UserRecoverableAuthIOException) {
                 // YouTube scope not yet granted — surface the consent Intent to the UI
                 _uiState.value = _uiState.value.copy(isUploadingToYouTube = false)
+                pendingAuthAction = PendingAuthAction.UPLOAD
                 _youtubeAuthIntent.value = e.intent
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -571,6 +753,17 @@ enum class OcrMode(val displayName: String) {
     AUTO_INSERT("Auto Extract (Insert all text automatically)")
 }
 
+data class YouTubePlaylist(
+    val id: String,
+    val title: String
+)
+
+data class YouTubeChannel(
+    val id: String,
+    val title: String,
+    val thumbnailUrl: String? = null
+)
+
 data class MainUiState(
     val text: String = "",
     val selectedLanguage: String = "en",
@@ -590,7 +783,14 @@ data class MainUiState(
     val isDetectingLanguageError: Boolean = false,
     val isYouTubeConnected: Boolean = false,
     val connectedAccountName: String? = null,
-    val selectedPlaylist: String = "",
-    val availablePlaylists: List<String> = listOf("My Videos", "Vlogs", "Tutorials"),
-    val selectedPrivacy: String = "Public"
+    val selectedPlaylistId: String? = null,
+    val selectedPlaylistName: String = "",
+    val availablePlaylists: List<YouTubePlaylist> = emptyList(),
+    val isFetchingPlaylists: Boolean = false,
+    val selectedPrivacy: String = "Public",
+    val youtubeChannels: List<YouTubeChannel> = emptyList(),
+    val selectedChannelId: String? = null,
+    val selectedChannelName: String? = null,
+    val showChannelPicker: Boolean = false,
+    val isFetchingChannels: Boolean = false
 )

@@ -6,6 +6,9 @@ import com.google.api.client.http.InputStreamContent
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.youtube.YouTube
+import com.google.api.services.youtube.model.PlaylistItem
+import com.google.api.services.youtube.model.PlaylistItemSnippet
+import com.google.api.services.youtube.model.ResourceId
 import com.google.api.services.youtube.model.Video
 import com.google.api.services.youtube.model.VideoSnippet
 import com.google.api.services.youtube.model.VideoStatus
@@ -24,6 +27,7 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
         videoFile: File,
         title: String,
         description: String,
+        playlistId: String? = null,
         credential: GoogleAccountCredential
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -58,7 +62,30 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
 
             val returnedVideo = videoInsert.execute()
             
-            Result.success(returnedVideo.id)
+            val videoId = returnedVideo?.id ?: return@withContext Result.failure(Exception("Failed to upload"))
+
+            // Add the video to the specified playlist if a playlist ID was provided
+            if (!playlistId.isNullOrEmpty()) {
+                try {
+                    val playlistItem = PlaylistItem().apply {
+                        snippet = PlaylistItemSnippet().apply {
+                            this.playlistId = playlistId
+                            resourceId = ResourceId().apply {
+                                kind = "youtube#video"
+                                this.videoId = videoId
+                            }
+                        }
+                    }
+                    youtubeService.playlistItems()
+                        .insert("snippet", playlistItem)
+                        .execute()
+                } catch (e: Exception) {
+                    // Log but don't fail the whole video upload
+                    e.printStackTrace()
+                }
+            }
+            
+            Result.success(videoId)
         } catch (e: Exception) {
             e.printStackTrace()
             Result.failure(e)

@@ -55,32 +55,30 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
     suspend fun generateVideo(text: String, audioFile: File, repetitions: Int): File? {
         return withContext(Dispatchers.IO) {
             try {
-                var durationMs = 0L
+                // Get duration of the 1-rep audio file
+                var singleRepDurationMs = 0L
                 try {
                     val retriever = MediaMetadataRetriever()
                     retriever.setDataSource(audioFile.absolutePath)
                     val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    durationMs = time?.toLong() ?: (text.length * 100L * repetitions)
+                    singleRepDurationMs = time?.toLong() ?: (text.length * 100L)
                     retriever.release()
                 } catch (e: Exception) {
-                    durationMs = text.length * 100L * repetitions
+                    singleRepDurationMs = text.length * 100L
                 }
 
                 val fps = 10
-                val totalFrames = ((durationMs / 1000.0) * fps).toInt()
-                val (bg, qr, logo) = loadAssets()
+                // Generate frames for ONE repetition only
+                val singleRepFrames = ((singleRepDurationMs / 1000.0) * fps).toInt().coerceAtLeast(1)
                 
+                val (bg, qr, logo) = loadAssets()
                 val framesDir = File(context.cacheDir, "frames_${UUID.randomUUID()}").apply { mkdirs() }
                 
-                // Roughly map frames to character indices
-                val charsExtracted = text.filter { !it.isWhitespace() }
-                val numChars = charsExtracted.length
+                // Count characters - use simple non-whitespace count for highlight
+                val numChars = text.count { !it.isWhitespace() }
                 
-                val framesPerRepetition = totalFrames / maxOf(1, repetitions)
-                
-                for (i in 0 until totalFrames) {
-                    val frameInRep = i % framesPerRepetition
-                    val progress = frameInRep.toFloat() / framesPerRepetition.toFloat()
+                for (i in 0 until singleRepFrames) {
+                    val progress = i.toFloat() / singleRepFrames.toFloat()
                     var highlightIndex = (progress * numChars).toInt()
                     if (highlightIndex >= numChars) highlightIndex = numChars - 1
                     if (numChars == 0) highlightIndex = -1
@@ -98,20 +96,41 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                 logo?.recycle()
                 
                 val outputVideoDir = File(context.cacheDir, "videos").apply { mkdirs() }
+                val singleRepVideo = File(outputVideoDir, "single_rep_${UUID.randomUUID()}.mp4")
                 val outputVideoFile = File(outputVideoDir, "output_${UUID.randomUUID()}.mp4")
                 
-                // Build FFmpeg command to stitch frames
-                val command = "-framerate $fps -i \"${framesDir.absolutePath}/frame_%04d.jpg\" -i \"${audioFile.absolutePath}\" " +
-                        "-c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 192k -pix_fmt yuv420p -shortest \"${outputVideoFile.absolutePath}\""
+                // Step 1: Create single-repetition video from frames AND audio
+                val step1Command = "-framerate $fps -i \"${framesDir.absolutePath}/frame_%04d.jpg\" " +
+                    "-i \"${audioFile.absolutePath}\" " +
+                    "-c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 192k -pix_fmt yuv420p " +
+                    "-shortest \"${singleRepVideo.absolutePath}\""
                 
-                val session = FFmpegKit.execute(command)
-                
+                val step1Session = FFmpegKit.execute(step1Command)
                 framesDir.deleteRecursively()
                 
-                if (ReturnCode.isSuccess(session.returnCode)) {
+                if (!ReturnCode.isSuccess(step1Session.returnCode)) {
+                    println("FFmpeg Step1 Error: ${step1Session.allLogsAsString}")
+                    return@withContext null
+                }
+                
+                // Step 2: Concat the 1-rep video N times
+                val concatListFile = File(outputVideoDir, "concat_txt_${UUID.randomUUID()}.txt")
+                concatListFile.bufferedWriter().use { writer ->
+                    repeat(maxOf(1, repetitions)) {
+                        writer.write("file '${singleRepVideo.absolutePath}'\n")
+                    }
+                }
+                
+                val step2Command = "-f concat -safe 0 -i \"${concatListFile.absolutePath}\" -c copy \"${outputVideoFile.absolutePath}\""
+                val step2Session = FFmpegKit.execute(step2Command)
+                
+                singleRepVideo.delete()
+                concatListFile.delete()
+                
+                if (ReturnCode.isSuccess(step2Session.returnCode)) {
                     outputVideoFile
                 } else {
-                    println("FFmpeg Error: ${session.allLogsAsString}")
+                    println("FFmpeg Step2 Error: ${step2Session.allLogsAsString}")
                     null
                 }
             } catch (e: Exception) {
@@ -148,41 +167,54 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
         val textWidth = width - horizontalPadding * 2
 
         // Simple layout logic: word wrap and draw character by character for highlight
-        val words = text.split(Regex("(?<=\\s)|(?=\\s)")).filter { it.isNotEmpty() }
-        
-        var tempX = horizontalPadding.toFloat()
+        val words = text.trim().split(Regex("\\s+"))
         val lineHeight = 80f
-        var lineCount = 1
-
+        
+        // 1. First Pass: Word-wrap into lines
+        val lineWords = mutableListOf<MutableList<String>>()
+        var currentLine = mutableListOf<String>()
+        var currentLineWidth = 0f
+        
         for (word in words) {
             val wordWidth = textPaint.measureText(word)
-            if (tempX + wordWidth > width - horizontalPadding && word.isNotBlank()) {
-                tempX = horizontalPadding.toFloat()
-                lineCount++
+            val spaceWidth = textPaint.measureText(" ")
+            val neededWidth = if (currentLine.isEmpty()) wordWidth else spaceWidth + wordWidth
+            if (currentLineWidth + neededWidth > width - horizontalPadding * 2 && currentLine.isNotEmpty()) {
+                lineWords.add(currentLine)
+                currentLine = mutableListOf(word)
+                currentLineWidth = wordWidth
+            } else {
+                currentLine.add(word)
+                currentLineWidth += neededWidth
             }
-            tempX += wordWidth
+        }
+        if (currentLine.isNotEmpty()) {
+            lineWords.add(currentLine)
         }
 
-        val totalHeight = lineCount * lineHeight
+        val totalHeight = lineWords.size * lineHeight
         var currentY = (height - totalHeight) / 2f + 60f
-        var currentX = horizontalPadding.toFloat()
 
-        var charIdx = 0
+        var charIdx = 0 // Counts only non-whitespace characters
         var logoX = -1f
         var logoY = -1f
 
-        for (word in words) {
-            val wordWidth = textPaint.measureText(word)
-            if (currentX + wordWidth > width - horizontalPadding && word.isNotBlank()) {
-                currentX = horizontalPadding.toFloat()
-                currentY += lineHeight
-            }
+        // 2. Second Pass: Draw horizontally centered lines
+        for (line in lineWords) {
+            // Measure precise width of this exact line
+            val fullLineText = line.joinToString(" ")
+            val exactLineWidth = textPaint.measureText(fullLineText)
+            
+            // X position starting strictly centered
+            var currentX = (width - exactLineWidth) / 2f
 
-            for (char in word) {
-                val str = char.toString()
-                val charW = textPaint.measureText(str)
+            for (i in line.indices) {
+                val word = line[i]
                 
-                if (!char.isWhitespace()) {
+                for (char in word) {
+                    val str = char.toString()
+                    val charW = textPaint.measureText(str)
+                    
                     val isActive = (charIdx == highlightIndex)
                     if (isActive) {
                         canvas.drawRect(currentX - 4, currentY - 60, currentX + charW + 4, currentY + 10, boxPaint)
@@ -192,13 +224,18 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                     } else {
                         canvas.drawText(str, currentX, currentY, textPaint)
                     }
-                    charIdx++
-                } else {
-                    canvas.drawText(str, currentX, currentY, textPaint)
+                    charIdx++ // Only non-whitespace chars (words don't contain whitespace)
+                    
+                    currentX += charW
                 }
                 
-                currentX += charW
+                // Draw space between words
+                if (i < line.size - 1) {
+                    val spaceW = textPaint.measureText(" ")
+                    currentX += spaceW
+                }
             }
+            currentY += lineHeight
         }
 
         if (logo != null && logoX != -1f && logoY != -1f) {
