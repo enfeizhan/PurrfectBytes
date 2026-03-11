@@ -27,12 +27,13 @@ import com.purrfectbytes.android.ui.components.PhotoWithTextOverlay
 import com.purrfectbytes.android.ui.components.PrecisePhotoTextOverlay
 import com.purrfectbytes.android.services.RecognitionScript
 import com.purrfectbytes.android.viewmodels.MainViewModel
+import android.accounts.Account
+import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.services.youtube.YouTubeScopes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,37 +50,54 @@ fun MainScreen(
     val isAnalyzingPhoto by viewModel.isAnalyzingPhoto.collectAsState()
     val showTextAnalyzer by viewModel.showTextAnalyzer.collectAsState()
     val selectedScript by viewModel.selectedScript.collectAsState()
+    val youtubeAuthIntent by viewModel.youtubeAuthIntent.collectAsState()
 
-    // Google Sign-In setup
+    // YouTube OAuth via GoogleAccountCredential
     val context = LocalContext.current
-    val signInLauncher = rememberLauncherForActivityResult(
+    val credential = remember {
+        GoogleAccountCredential.usingOAuth2(
+            context,
+            listOf(YouTubeScopes.YOUTUBE_UPLOAD)
+        )
+    }
+
+    // Launcher for YouTube permission consent screen (triggered by UserRecoverableAuthIOException)
+    val youtubeConsentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            account?.account?.name?.let { accountName ->
-                viewModel.setYouTubeConnected(true, accountName)
-            }
-        } catch (e: ApiException) {
-            // Handle error, maybe show a snackbar (already handled in viewModel mostly)
-            println("Google Sign In Failed: ${e.statusCode}")
+        viewModel.consumeYoutubeAuthIntent()
+        if (result.resultCode == Activity.RESULT_OK) {
+            // Permission granted — retry the upload
+            viewModel.uploadToYouTube()
         }
     }
-    
+
+    // Auto-launch consent screen whenever the ViewModel emits an auth intent
+    LaunchedEffect(youtubeAuthIntent) {
+        youtubeAuthIntent?.let { intent ->
+            youtubeConsentLauncher.launch(intent)
+        }
+    }
+
+    // Launcher to handle account picker result
+    val youtubeAuthLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val accountName = result.data
+                ?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)
+            if (accountName != null) {
+                credential.selectedAccountName = accountName
+                viewModel.setYouTubeConnected(true, accountName)
+            }
+        }
+    }
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let { viewModel.onPhotoCaptured(it) }
-    }
 
-    val googleSignInClient = remember {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            // In a real app, you would uncomment this and use the Web Client ID
-            // .requestServerAuthCode(BuildConfig.YOUTUBE_CLIENT_ID)
-            .build()
-        GoogleSignIn.getClient(context, gso)
     }
 
     // Auto-scroll to bottom of text field when new text is added
@@ -589,7 +607,7 @@ fun MainScreen(
                         }
                     } else {
                         OutlinedButton(
-                            onClick = { signInLauncher.launch(googleSignInClient.signInIntent) },
+                            onClick = { youtubeAuthLauncher.launch(credential.newChooseAccountIntent()) },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Connect to YouTube")

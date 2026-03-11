@@ -22,8 +22,10 @@ import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccoun
 import com.google.api.services.youtube.YouTubeScopes
 import android.accounts.Account
 import android.content.Context
+import android.content.Intent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.google.mlkit.nl.languageid.LanguageIdentification
+import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -48,6 +50,11 @@ class MainViewModel @Inject constructor(
     val capturedPhotoUri: StateFlow<Uri?> = _capturedPhotoUri.asStateFlow()
 
     private val _showCamera = MutableStateFlow(false)
+    // Emits the intent the user must launch to grant YouTube OAuth permissions
+    private val _youtubeAuthIntent = MutableStateFlow<Intent?>(null)
+    val youtubeAuthIntent: StateFlow<Intent?> = _youtubeAuthIntent.asStateFlow()
+
+    fun consumeYoutubeAuthIntent() { _youtubeAuthIntent.value = null }
     val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
 
     private val _recognizedTextBlocks = MutableStateFlow<List<RecognizedTextBlock>>(emptyList())
@@ -254,6 +261,10 @@ class MainViewModel @Inject constructor(
                     )
                 }
 
+            } catch (e: UserRecoverableAuthIOException) {
+                // YouTube scope not yet granted — surface the consent Intent to the UI
+                _uiState.value = _uiState.value.copy(isUploadingToYouTube = false)
+                _youtubeAuthIntent.value = e.intent
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isUploadingToYouTube = false,
