@@ -584,6 +584,131 @@ fun MainScreen(
             }
         }
 
+        val generatedVideoFile by viewModel.generatedVideoFile.collectAsState()
+        
+        // Preview Image
+        if (previewImageFile != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "👀 Video Preview",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        IconButton(onClick = { viewModel.dismissPreview() }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss preview",
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    AsyncImage(
+                        model = previewImageFile,
+                        contentDescription = "Video preview frame",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(MaterialTheme.shapes.medium),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+        }
+        
+        if (generatedVideoFile != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Header row with title and dismiss button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(
+                                text = "🎬 Video Generated!",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "File saved to device cache",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        IconButton(onClick = { viewModel.dismissVideo() }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss video",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+                    
+                    DisposableEffect(generatedVideoFile) {
+                        val player = ExoPlayer.Builder(context).build().apply {
+                            setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(generatedVideoFile)))
+                            prepare()
+                            playWhenReady = false
+                        }
+                        exoPlayer = player
+                        
+                        onDispose {
+                            player.release()
+                        }
+                    }
+                    
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = true
+                                setShowNextButton(false)
+                                setShowPreviousButton(false)
+                            }
+                        },
+                        update = { view ->
+                            view.player = exoPlayer
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(MaterialTheme.shapes.medium)
+                    )
+                }
+            }
+        }
+        
             // YouTube Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -824,131 +949,6 @@ fun MainScreen(
                 }
             }
         }
-        val generatedVideoFile by viewModel.generatedVideoFile.collectAsState()
-        
-        // Preview Image
-        if (previewImageFile != null) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "👀 Video Preview",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                        IconButton(onClick = { viewModel.dismissPreview() }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Dismiss preview",
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    AsyncImage(
-                        model = previewImageFile,
-                        contentDescription = "Video preview frame",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(MaterialTheme.shapes.medium),
-                        contentScale = ContentScale.Fit
-                    )
-                }
-            }
-        }
-        
-        if (generatedVideoFile != null) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Header row with title and dismiss button
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "🎬 Video Generated!",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = "File saved to device cache",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                        IconButton(onClick = { viewModel.dismissVideo() }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Dismiss video",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-                    
-                    DisposableEffect(generatedVideoFile) {
-                        val player = ExoPlayer.Builder(context).build().apply {
-                            setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(generatedVideoFile)))
-                            prepare()
-                            playWhenReady = false
-                        }
-                        exoPlayer = player
-                        
-                        onDispose {
-                            player.release()
-                        }
-                    }
-                    
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                useController = true
-                                setShowNextButton(false)
-                                setShowPreviousButton(false)
-                            }
-                        },
-                        update = { view ->
-                            view.player = exoPlayer
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
-                            .clip(MaterialTheme.shapes.medium)
-                    )
-                }
-            }
-        }
-        
         // Error Message
         uiState.errorMessage?.let { error ->
             Card(

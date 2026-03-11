@@ -52,7 +52,7 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
         }
     }
 
-    suspend fun generateVideo(text: String, audioFile: File): File? {
+    suspend fun generateVideo(text: String, audioFile: File, repetitions: Int): File? {
         return withContext(Dispatchers.IO) {
             try {
                 var durationMs = 0L
@@ -60,10 +60,10 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                     val retriever = MediaMetadataRetriever()
                     retriever.setDataSource(audioFile.absolutePath)
                     val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    durationMs = time?.toLong() ?: (text.length * 100L)
+                    durationMs = time?.toLong() ?: (text.length * 100L * repetitions)
                     retriever.release()
                 } catch (e: Exception) {
-                    durationMs = text.length * 100L
+                    durationMs = text.length * 100L * repetitions
                 }
 
                 val fps = 10
@@ -76,8 +76,11 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                 val charsExtracted = text.filter { !it.isWhitespace() }
                 val numChars = charsExtracted.length
                 
+                val framesPerRepetition = totalFrames / maxOf(1, repetitions)
+                
                 for (i in 0 until totalFrames) {
-                    val progress = i.toFloat() / totalFrames.toFloat()
+                    val frameInRep = i % framesPerRepetition
+                    val progress = frameInRep.toFloat() / framesPerRepetition.toFloat()
                     var highlightIndex = (progress * numChars).toInt()
                     if (highlightIndex >= numChars) highlightIndex = numChars - 1
                     if (numChars == 0) highlightIndex = -1
@@ -146,9 +149,23 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
 
         // Simple layout logic: word wrap and draw character by character for highlight
         val words = text.split(Regex("(?<=\\s)|(?=\\s)")).filter { it.isNotEmpty() }
-        var currentY = 150f
-        var currentX = horizontalPadding.toFloat()
+        
+        var tempX = horizontalPadding.toFloat()
         val lineHeight = 80f
+        var lineCount = 1
+
+        for (word in words) {
+            val wordWidth = textPaint.measureText(word)
+            if (tempX + wordWidth > width - horizontalPadding && word.isNotBlank()) {
+                tempX = horizontalPadding.toFloat()
+                lineCount++
+            }
+            tempX += wordWidth
+        }
+
+        val totalHeight = lineCount * lineHeight
+        var currentY = (height - totalHeight) / 2f + 60f
+        var currentX = horizontalPadding.toFloat()
 
         var charIdx = 0
         var logoX = -1f

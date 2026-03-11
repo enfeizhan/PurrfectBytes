@@ -334,7 +334,8 @@ class MainViewModel @Inject constructor(
                         // 2. Generate video natively using the new audio file
                         val videoFile = videoGeneratorService.generateVideo(
                             text = currentState.text,
-                            audioFile = audioFile
+                            audioFile = audioFile,
+                            repetitions = currentState.repetitions
                         )
                         
                         if (videoFile != null) {
@@ -576,7 +577,7 @@ data class MainUiState(
     val selectedTtsEngine: String = "edge",
     val ocrMode: OcrMode = OcrMode.INTERACTIVE,
     val isSlowSpeech: Boolean = false,
-    val repetitions: Int = 1,
+    val repetitions: Int = 10,
     val errorMessage: String? = null,
     val successMessage: String? = null,
     val isConvertingVideo: Boolean = false,
