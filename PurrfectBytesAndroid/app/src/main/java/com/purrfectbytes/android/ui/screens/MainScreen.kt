@@ -45,6 +45,7 @@ fun MainScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val currentStatus by viewModel.currentStatus.collectAsState()
     val generatedAudioFile by viewModel.generatedAudioFile.collectAsState()
+    val previewImageFile by viewModel.previewImageFile.collectAsState()
     val capturedPhotoUri by viewModel.capturedPhotoUri.collectAsState()
     val recognizedTextBlocks by viewModel.recognizedTextBlocks.collectAsState()
     val isAnalyzingPhoto by viewModel.isAnalyzingPhoto.collectAsState()
@@ -546,28 +547,42 @@ fun MainScreen(
             }
         }
         // Action Buttons
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { viewModel.generatePreview() },
+                modifier = Modifier.weight(1f),
+                enabled = !isLoading && uiState.text.isNotBlank() && !uiState.isConvertingVideo,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Icon(Icons.Default.Image, contentDescription = null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Preview")
+            }
+            
             Button(
                 onClick = { viewModel.generateNativeVideo() },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f),
                 enabled = !isLoading && uiState.text.isNotBlank() && !uiState.isConvertingVideo,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 if (uiState.isConvertingVideo) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Rendering Video...")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Rendering")
                 } else {
                     Icon(Icons.Default.Movie, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text("Render MP4")
                 }
             }
-
-            }
+        }
 
             // YouTube Section
             Card(
@@ -809,8 +824,54 @@ fun MainScreen(
                 }
             }
         }
-        
         val generatedVideoFile by viewModel.generatedVideoFile.collectAsState()
+        
+        // Preview Image
+        if (previewImageFile != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "👀 Video Preview",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        IconButton(onClick = { viewModel.dismissPreview() }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss preview",
+                                tint = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    AsyncImage(
+                        model = previewImageFile,
+                        contentDescription = "Video preview frame",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(MaterialTheme.shapes.medium),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+        }
         
         if (generatedVideoFile != null) {
             Card(

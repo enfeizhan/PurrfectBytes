@@ -52,6 +52,9 @@ class MainViewModel @Inject constructor(
     private val _generatedVideoFile = MutableStateFlow<File?>(null)
     val generatedVideoFile: StateFlow<File?> = _generatedVideoFile.asStateFlow()
 
+    private val _previewImageFile = MutableStateFlow<File?>(null)
+    val previewImageFile: StateFlow<File?> = _previewImageFile.asStateFlow()
+
     private val _capturedPhotoUri = MutableStateFlow<Uri?>(null)
     val capturedPhotoUri: StateFlow<Uri?> = _capturedPhotoUri.asStateFlow()
 
@@ -435,6 +438,38 @@ class MainViewModel @Inject constructor(
 
     fun dismissVideo() {
         _generatedVideoFile.value = null
+    }
+
+    fun dismissPreview() {
+        _previewImageFile.value = null
+    }
+    
+    fun generatePreview() {
+        val currentState = _uiState.value
+        
+        if (currentState.text.isBlank()) {
+            _uiState.value = currentState.copy(errorMessage = "Please enter some text")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                _uiState.value = currentState.copy(errorMessage = null)
+                val previewImage = videoGeneratorService.getPreviewImage(currentState.text)
+                
+                if (previewImage != null) {
+                    _previewImageFile.value = previewImage
+                } else {
+                    _uiState.value = currentState.copy(
+                        errorMessage = "Failed to generate preview."
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = currentState.copy(
+                    errorMessage = "Unexpected error generating preview: ${e.message}"
+                )
+            }
+        }
     }
 
     fun openCamera() {
