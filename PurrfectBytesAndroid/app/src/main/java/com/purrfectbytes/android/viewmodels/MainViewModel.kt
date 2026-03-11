@@ -26,6 +26,12 @@ import android.content.Intent
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import com.purrfectbytes.android.di.dataStore
+import kotlinx.coroutines.flow.first
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
@@ -80,10 +86,25 @@ class MainViewModel @Inject constructor(
         "native" to "Android Native TTS - Offline voices"
     )
 
+    companion object {
+        private val KEY_YT_ACCOUNT = stringPreferencesKey("yt_account_name")
+    }
+
     init {
         // Initialize TTS service
         viewModelScope.launch {
             ttsService.initialize()
+        }
+        // Restore persisted YouTube account
+        viewModelScope.launch {
+            val prefs = context.dataStore.data.first()
+            val savedAccount = prefs[KEY_YT_ACCOUNT]
+            if (!savedAccount.isNullOrBlank()) {
+                _uiState.value = _uiState.value.copy(
+                    isYouTubeConnected = true,
+                    connectedAccountName = savedAccount
+                )
+            }
         }
     }
     
@@ -206,6 +227,16 @@ class MainViewModel @Inject constructor(
             isYouTubeConnected = connected,
             connectedAccountName = accountName
         )
+        // Persist account name to DataStore
+        viewModelScope.launch {
+            context.dataStore.edit { prefs ->
+                if (connected && accountName != null) {
+                    prefs[KEY_YT_ACCOUNT] = accountName
+                } else {
+                    prefs.remove(KEY_YT_ACCOUNT)
+                }
+            }
+        }
     }
 
     fun updateYouTubePlaylist(playlist: String) {

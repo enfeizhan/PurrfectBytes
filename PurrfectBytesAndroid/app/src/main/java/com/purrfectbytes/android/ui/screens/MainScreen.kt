@@ -865,7 +865,7 @@ fun MainScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(9f / 16f)
+                            .height(320.dp)
                             .clip(MaterialTheme.shapes.medium)
                     )
                 }
