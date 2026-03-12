@@ -161,7 +161,7 @@ class YouTubeMetadataService:
                 "id": "anthropic",
                 "name": "Anthropic Claude",
                 "available": bool(ANTHROPIC_API_KEY),
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-3-haiku-20240307",
             },
         ]
 
@@ -203,7 +203,7 @@ class YouTubeMetadataService:
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-haiku-20240307",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
