@@ -140,7 +140,7 @@ class YouTubeMetadataService:
         else:
             raise ValueError(f"Provider {provider} not implemented")
 
-        return self._parse_response(raw_text)
+        return self._parse_response(raw_text, sentence.strip())
 
     def get_available_providers(self) -> list[dict]:
         """Return list of available providers and their status."""
@@ -209,73 +209,84 @@ class YouTubeMetadataService:
         )
         return response.content[0].text
 
-    def _parse_response(self, raw_text: str) -> dict:
+    def _parse_response(self, raw_text: str, original_sentence: str) -> dict:
         """
         Parse LLM response into title and description.
-
-        The first non-empty line is treated as the title,
-        everything else is the description.
         """
         lines = raw_text.strip().split("\n")
 
-        # Find first non-empty line as title
-        title = ""
+        # Find first non-empty line as potential title
+        raw_title = ""
         description_start = 0
         for i, line in enumerate(lines):
             stripped = line.strip()
             if stripped:
-                title = stripped
+                raw_title = stripped
                 description_start = i + 1
                 break
 
         # Rest is description
         description = "\n".join(lines[description_start:]).strip()
 
-        # Clean up title — remove any "TITLE:" prefix the LLM might add
+        # Clean up title (remove any "TITLE:" prefix, markdown, etc.)
+        title = raw_title
         for prefix in ["TITLE:", "Title:", "title:"]:
-            if title.startswith(prefix):
+            if title.lower().startswith(prefix.lower()):
                 title = title[len(prefix):].strip()
+        
+        # Strip markdown bold markers if present
+        title = title.strip().replace("**", "").replace("__", "").strip()
+        if title.startswith('"') and title.endswith('"'):
+            title = title[1:-1].strip()
 
-        # Explicitly reconstruct to guarantee formatting: "My Study Journal: <Language> Sentence - <sentence> | Reading & Pronunciation"
+        # Attempt to reconstruct/standardize title
         import re
         
         # 1. Extract Language
-        language = "Language"
+        found_language = None
         lang_match = re.search(r'My Study Journal:\s*([a-zA-Z\s]+?)(?:\s*Sentence)?\s*-', title, re.IGNORECASE)
         if lang_match:
-            language = lang_match.group(1).strip()
-            # Clean up if the optional non-greedy match accidentally kept "Sentence"
-            if language.lower().endswith(" sentence"):
-                language = language[:-9].strip()
+            found_language = lang_match.group(1).strip()
+            if found_language.lower().endswith(" sentence"):
+                found_language = found_language[:-9].strip()
 
         # 2. Extract Target Sentence
-        sentence = "..."
+        found_sentence = None
         sentence_match = re.search(r'"(.*?)"', title)
         if sentence_match:
-            sentence = sentence_match.group(1).strip()
+            found_sentence = sentence_match.group(1).strip()
         else:
-            # Fallback if the LLM forgot the quotation marks
+            # Fallback for target sentence extraction
             fallback_match = re.search(r'-\s*(.*?)\s*\|', title)
             if fallback_match:
-                sentence = fallback_match.group(1).strip()
+                found_sentence = fallback_match.group(1).strip()
 
-        # 3. Create the exact perfect string parts
-        prefix = f'My Study Journal: {language} Sentence - "'
-        suffix = '" | Reading & Pronunciation'
+        # Reconstruct to guarantee format and 100-char limit
+        if found_language or found_sentence:
+            language_to_use = found_language or "Language"
+            sentence_to_use = found_sentence or original_sentence[:50]
+            
+            prefix = f'My Study Journal: {language_to_use} Sentence - "'
+            suffix = '" | Reading & Pronunciation'
 
-        # 4. Truncate target sentence safely to guarantee ≤100 chars
-        if len(prefix) + len(sentence) + len(suffix) > 100:
-            allowed_len = 100 - len(prefix) - len(suffix) - 3  # minus 3 for the '...'
-            if allowed_len > 0:
-                sentence = sentence[:allowed_len].strip() + "..."
-                title = f'{prefix}{sentence}{suffix}'
+            if len(prefix) + len(sentence_to_use) + len(suffix) > 100:
+                allowed_len = 100 - len(prefix) - len(suffix) - 3
+                if allowed_len > 0:
+                    sentence_to_use = sentence_to_use[:allowed_len].strip() + "..."
+                    final_title = f'{prefix}{sentence_to_use}{suffix}'
+                else:
+                    final_title = (prefix + sentence_to_use + suffix)[:97] + "..."
             else:
-                # Fallback if somehow the language name itself is insanely long
-                title = f'{prefix}{sentence}{suffix}'[:97] + "..."
-        else:
-            title = f'{prefix}{sentence}{suffix}'
-
+                final_title = f'{prefix}{sentence_to_use}{suffix}'
+            
+            return {
+                "title": final_title,
+                "description": description,
+            }
+        
+        # Total fallback: If we couldn't parse it well, just cap the length of whatever line we have
+        final_title = title if len(title) <= 100 else title[:97] + "..."
         return {
-            "title": title,
+            "title": final_title,
             "description": description,
         }
