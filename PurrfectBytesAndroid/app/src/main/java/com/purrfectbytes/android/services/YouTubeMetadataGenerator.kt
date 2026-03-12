@@ -233,7 +233,7 @@ TARGET SENTENCE: {sentence}"""
 
     private suspend fun generateAnthropicMetadata(prompt: String): String {
         val request = AnthropicRequest(
-            model = "claude-3-haiku-20240307",
+            model = "claude-sonnet-4-20250514",
             maxTokens = 2048,
             messages = listOf(AnthropicMessage(role = "user", content = prompt))
         )
