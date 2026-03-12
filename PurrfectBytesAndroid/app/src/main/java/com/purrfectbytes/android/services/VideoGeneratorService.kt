@@ -67,7 +67,7 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                     singleRepDurationMs = text.length * 100L
                 }
 
-                val fps = 10
+                val fps = 30
                 // Generate frames for ONE repetition only
                 val singleRepFrames = ((singleRepDurationMs / 1000.0) * fps).toInt().coerceAtLeast(1)
                 
@@ -100,9 +100,11 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                 val outputVideoFile = File(outputVideoDir, "output_${UUID.randomUUID()}.mp4")
                 
                 // Step 1: Create single-repetition video from frames AND audio
+                // Added -movflags +faststart for YouTube streamability
                 val step1Command = "-framerate $fps -i \"${framesDir.absolutePath}/frame_%04d.jpg\" " +
                     "-i \"${audioFile.absolutePath}\" " +
                     "-c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 192k -pix_fmt yuv420p " +
+                    "-movflags +faststart " +
                     "-shortest \"${singleRepVideo.absolutePath}\""
                 
                 val step1Session = FFmpegKit.execute(step1Command)
@@ -121,7 +123,7 @@ class VideoGeneratorService @Inject constructor(private val context: Context) {
                     }
                 }
                 
-                val step2Command = "-f concat -safe 0 -i \"${concatListFile.absolutePath}\" -c copy \"${outputVideoFile.absolutePath}\""
+                val step2Command = "-f concat -safe 0 -i \"${concatListFile.absolutePath}\" -c copy -movflags +faststart \"${outputVideoFile.absolutePath}\""
                 val step2Session = FFmpegKit.execute(step2Command)
                 
                 singleRepVideo.delete()
