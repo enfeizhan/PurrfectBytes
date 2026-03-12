@@ -188,13 +188,33 @@ Efficient content generation with repetition:
 - **Synchronization**: Perfect timing maintained across all repetitions
 - **CLI Tools**: `concatenate.py` for command-line usage
 
-### Mobile Text Recognition
+### Mobile Text Recognition & Metadata
 
 Android app includes ML Kit integration:
 - Camera capture with CameraX
 - Text extraction from photos (including CJK characters)
 - Clickable text overlay on captured images
 - Send extracted text to web API for TTS/video generation
+
+### YouTube Integration & AI Metadata
+
+The platform features integrated YouTube upload and SEO metadata generation:
+
+1. **Authentication**: 
+   - Consistent OAuth2 flow across Web and Android.
+   - Persistent connection state (re-auth not required on every restart).
+   - Scope: `https://www.googleapis.com/auth/youtube`.
+
+2. **AI Metadata Generation (SEO)**:
+   - Dual provider support: **Google Gemini** (`gemini-2.5-flash`) and **Anthropic Claude** (`claude-sonnet-4-20250514`).
+   - Unified prompt template across platforms focusing on "My Study Journal" branding.
+   - Robust regex-based parsing for English-first explanations and character-limited titles.
+
+3. **YouTube Video Management**:
+   - Direct upload with Education category (27).
+   - Supports Public, Private, and Unlisted status.
+   - Automated addition to user-selected Playlists.
+   - FFmpeg `faststart` optimization for near-instant YouTube processing.
 
 ## API Endpoints Reference
 
@@ -275,8 +295,10 @@ Language detection automatically identifies the input language, with special han
 
 ## YouTube Content Generation
 
-The project includes a comprehensive AI prompt template (in main README.md) for generating YouTube titles and descriptions for language learning videos. The prompt creates:
-- Formatted titles: "My Study Journal: [LANGUAGE] Sentence - "[TEXT]" | Reading & Pronunciation"
-- Structured descriptions with translation, breakdown, grammar points
-- Proper credit attribution for sourced content
-- Appropriate hashtags for discoverability
+The project features an integrated AI metadata generator (Web/Android) that uses LLMs (Gemini/Claude) to create:
+- **Standardized Titles**: `My Study Journal: [LANGUAGE] Sentence - "[TEXT]" | Reading & Pronunciation` (guaranteed ≤ 100 chars).
+- **Structured Descriptions**: English-first intro, translation (for non-English), character/IPA breakdown, grammar points, and study tips.
+- **Automated Hashtags**: Language-specific tags and discoverability SEO.
+- **BOILERPLATE Integrity**: Automates fixed sections like credit attribution, call-to-actions, and support links.
+
+**Parsing Logic**: Both platforms contain complex regex parsers to guarantee the "Study Journal" format regardless of minor AI variance.
