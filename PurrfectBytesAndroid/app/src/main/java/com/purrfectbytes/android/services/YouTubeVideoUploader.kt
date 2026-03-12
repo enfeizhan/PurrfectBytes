@@ -26,6 +26,7 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
         videoFile: File,
         title: String,
         description: String,
+        privacyStatus: String = "private",
         playlistId: String? = null,
         accessToken: String
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -49,7 +50,7 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
                     categoryId = "22" // People & Blogs
                 }
                 status = VideoStatus().apply {
-                    privacyStatus = "private" // default private for testing
+                    this.privacyStatus = privacyStatus.lowercase()
                     selfDeclaredMadeForKids = false
                 }
             }

@@ -42,7 +42,7 @@ class YouTubeAuthManager @Inject constructor(@ApplicationContext private val con
             CLIENT_ID,
             ResponseTypeValues.CODE,
             REDIRECT_URI
-        ).setScope("https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload")
+        ).setScope("https://www.googleapis.com/auth/youtube")
          .setPrompt("consent select_account") // Forces the user to pick channel/brand account
          .setAdditionalParameters(mapOf("access_type" to "offline"))
 

@@ -458,6 +458,7 @@ class MainViewModel @Inject constructor(
                     videoFile = videoFile,
                     title = currentState.youtubeTitle,
                     description = currentState.youtubeDescription,
+                    privacyStatus = currentState.selectedPrivacy,
                     playlistId = currentState.selectedPlaylistId,
                     accessToken = accessToken
                 )
