@@ -213,6 +213,8 @@ class YouTubeMetadataService:
         """
         Parse LLM response into title and description.
         """
+        import re
+
         lines = raw_text.strip().split("\n")
 
         # Find first non-empty line as potential title
@@ -225,8 +227,10 @@ class YouTubeMetadataService:
                 description_start = i + 1
                 break
 
-        # Rest is description
+        # Rest is description - also strip any leading "DESCRIPTION:" label
         description = "\n".join(lines[description_start:]).strip()
+        # Remove leading "DESCRIPTION:" label if the LLM included it
+        description = re.sub(r'^DESCRIPTION:\s*\n?', '', description, flags=re.IGNORECASE).strip()
 
         # Clean up title (remove any "TITLE:" prefix, markdown, etc.)
         title = raw_title
@@ -236,30 +240,37 @@ class YouTubeMetadataService:
         
         # Strip markdown bold markers if present
         title = title.strip().replace("**", "").replace("__", "").strip()
-        if title.startswith('"') and title.endswith('"'):
-            title = title[1:-1].strip()
 
-        # Attempt to reconstruct/standardize title
-        import re
-        
-        # 1. Extract Language
+        # Try to extract language and sentence from the title line
+        # Use a greedy regex for the quoted sentence to handle apostrophes like "I'll"
         found_language = None
-        lang_match = re.search(r'My Study Journal:\s*([a-zA-Z\s]+?)(?:\s*Sentence)?\s*-', title, re.IGNORECASE)
-        if lang_match:
-            found_language = lang_match.group(1).strip()
-            if found_language.lower().endswith(" sentence"):
-                found_language = found_language[:-9].strip()
-
-        # 2. Extract Target Sentence
         found_sentence = None
-        sentence_match = re.search(r'"(.*?)"', title)
-        if sentence_match:
-            found_sentence = sentence_match.group(1).strip()
+
+        # Try full pattern match first: My Study Journal: <Language> Sentence - "<sentence>" | ...
+        full_match = re.search(
+            r'My Study Journal:\s*([a-zA-Z]+)\s+Sentence\s*-\s*["\u201c](.*?)["\u201d]\s*\|',
+            title, re.IGNORECASE
+        )
+        if full_match:
+            found_language = full_match.group(1).strip()
+            found_sentence = full_match.group(2).strip()
         else:
-            # Fallback for target sentence extraction
-            fallback_match = re.search(r'-\s*(.*?)\s*\|', title)
-            if fallback_match:
-                found_sentence = fallback_match.group(1).strip()
+            # Try language extraction alone
+            lang_match = re.search(r'My Study Journal:\s*([a-zA-Z]+)\s+Sentence\s*-', title, re.IGNORECASE)
+            if lang_match:
+                found_language = lang_match.group(1).strip()
+
+            # Try sentence extraction: get content between the LAST pair of quotes
+            # This handles apostrophes like "I'll tee up..."
+            quote_matches = re.findall(r'["\u201c](.*?)["\u201d]', title)
+            if quote_matches:
+                found_sentence = quote_matches[-1].strip() if quote_matches[-1].strip() else None
+            
+            if not found_sentence:
+                # Fallback: content between - and |
+                fallback_match = re.search(r'-\s*(.*?)\s*\|', title)
+                if fallback_match:
+                    found_sentence = fallback_match.group(1).strip().strip('"').strip('\u201c').strip('\u201d').strip()
 
         # Reconstruct to guarantee format and 100-char limit
         if found_language or found_sentence:
@@ -284,7 +295,7 @@ class YouTubeMetadataService:
                 "description": description,
             }
         
-        # Total fallback: If we couldn't parse it well, just cap the length of whatever line we have
+        # Total fallback: use the raw title line as-is
         final_title = title if len(title) <= 100 else title[:97] + "..."
         return {
             "title": final_title,

@@ -51,7 +51,6 @@ class YouTubeUploadService:
 
         auth_url, _ = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
             prompt="consent",
         )
         
@@ -231,7 +230,7 @@ class YouTubeUploadService:
         try:
             from google.oauth2.credentials import Credentials
             creds = Credentials.from_authorized_user_file(
-                YOUTUBE_TOKEN_FILE, YOUTUBE_SCOPES
+                YOUTUBE_TOKEN_FILE
             )
 
             # Try to refresh if expired
