@@ -130,23 +130,23 @@ TARGET SENTENCE: {sentence}"""
                     generateGeminiMetadata(prompt)
                 }
                 
-                parseResponse(responseText)
+                parseResponse(responseText, text)
             } catch (e: Exception) {
                 Pair("Error Generated Title", "Could not generate description: ${e.message}")
             }
         }
     }
 
-    private fun parseResponse(rawText: String): Pair<String, String> {
+    private fun parseResponse(rawText: String, originalText: String): Pair<String, String> {
         val lines = rawText.trim().split("\n")
         
-        // Find first non-empty line as title
-        var title = ""
+        // Find first non-empty line as potential title
+        var rawTitle = ""
         var descriptionStart = 0
         for (i in lines.indices) {
             val stripped = lines[i].trim()
             if (stripped.isNotEmpty()) {
-                title = stripped
+                rawTitle = stripped
                 descriptionStart = i + 1
                 break
             }
@@ -160,52 +160,66 @@ TARGET SENTENCE: {sentence}"""
         }
         val description = descriptionLines.joinToString("\n").trim()
 
-        // Clean up title
+        // Clean up title (remove TITLE: prefix, markdown, etc.)
+        var cleanTitle = rawTitle
         for (prefix in listOf("TITLE:", "Title:", "title:")) {
-            if (title.startsWith(prefix, ignoreCase = true)) {
-                title = title.substring(prefix.length).trim()
+            if (cleanTitle.startsWith(prefix, ignoreCase = true)) {
+                cleanTitle = cleanTitle.substring(prefix.length).trim()
             }
         }
+        cleanTitle = cleanTitle.trim().removeSurrounding("**").removeSurrounding("\"").trim()
 
-        // Reconstruct title to guarantee format
+        // Attempt to reconstruct/standardize title
         var language = "Language"
+        // FIXED: Added missing colon to regex
         val langPattern = java.util.regex.Pattern.compile("My Study Journal:\\s*([a-zA-Z\\s]+?)(?:\\s*Sentence)?\\s*-", java.util.regex.Pattern.CASE_INSENSITIVE)
-        val langMatcher = langPattern.matcher(title)
-        if (langMatcher.find()) {
-            language = langMatcher.group(1)?.trim() ?: "Language"
-            if (language.lowercase().endsWith(" sentence")) {
-                language = language.substring(0, language.length - 9).trim()
+        val langMatcher = langPattern.matcher(cleanTitle)
+        val foundLanguage = if (langMatcher.find()) {
+            var lang = langMatcher.group(1)?.trim() ?: "Language"
+            if (lang.lowercase().endsWith(" sentence")) {
+                lang = lang.substring(0, lang.length - 9).trim()
             }
-        }
+            lang
+        } else null
 
-        var sentence = "..."
+        var foundSentence: String? = null
         val sentencePattern = java.util.regex.Pattern.compile("\"(.*?)\"")
-        val sentenceMatcher = sentencePattern.matcher(title)
+        val sentenceMatcher = sentencePattern.matcher(cleanTitle)
         if (sentenceMatcher.find()) {
-            sentence = sentenceMatcher.group(1)?.trim() ?: "..."
+            foundSentence = sentenceMatcher.group(1)?.trim()
         } else {
             val fallbackPattern = java.util.regex.Pattern.compile("-\\s*(.*?)\\s*\\|")
-            val fallbackMatcher = fallbackPattern.matcher(title)
+            val fallbackMatcher = fallbackPattern.matcher(cleanTitle)
             if (fallbackMatcher.find()) {
-                sentence = fallbackMatcher.group(1)?.trim() ?: "..."
+                foundSentence = fallbackMatcher.group(1)?.trim()
             }
         }
 
-        val prefix = "My Study Journal: $language Sentence - \""
-        val suffix = "\" | Reading & Pronunciation"
-        
-        var finalTitle = if (prefix.length + sentence.length + suffix.length > 100) {
-            val allowedLen = 100 - prefix.length - suffix.length - 3
-            if (allowedLen > 0) {
-                prefix + sentence.take(allowedLen).trim() + "..." + suffix
+        // If we found both, reconstruct to enforce format and 100-char limit
+        return if (foundLanguage != null || foundSentence != null) {
+            val languageToUse = foundLanguage ?: "Language"
+            val sentenceToUse = foundSentence ?: originalText.take(50)
+            
+            val prefix = "My Study Journal: $languageToUse Sentence - \""
+            val suffix = "\" | Reading & Pronunciation"
+            
+            val finalTitle = if (prefix.length + sentenceToUse.length + suffix.length > 100) {
+                val allowedLen = 100 - prefix.length - suffix.length - 3
+                if (allowedLen > 0) {
+                    prefix + sentenceToUse.take(allowedLen).trim() + "..." + suffix
+                } else {
+                    (prefix + sentenceToUse + suffix).take(97) + "..."
+                }
             } else {
-                (prefix + sentence + suffix).take(97) + "..."
+                prefix + sentenceToUse + suffix
             }
+            Pair(finalTitle, description)
         } else {
-            prefix + sentence + suffix
+            // Fallback: If cleanTitle already looks like our format, use it, else just use it as-is
+            // But make sure it's not the start of the description
+            val finalTitle = if (cleanTitle.length > 100) cleanTitle.take(97) + "..." else cleanTitle
+            Pair(finalTitle, description)
         }
-
-        return Pair(finalTitle, description)
     }
 
     private suspend fun generateGeminiMetadata(prompt: String): String {
