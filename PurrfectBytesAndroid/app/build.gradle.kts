@@ -28,7 +28,9 @@ android {
             localProperties.load(FileInputStream(localPropertiesFile))
         }
         val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
+        val anthropicApiKey = localProperties.getProperty("ANTHROPIC_API_KEY") ?: ""
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "ANTHROPIC_API_KEY", "\"$anthropicApiKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

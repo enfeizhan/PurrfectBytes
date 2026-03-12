@@ -10,14 +10,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class YouTubeMetadataGenerator @Inject constructor() {
+class YouTubeMetadataGenerator @Inject constructor(
+    private val anthropicService: AnthropicService
+) {
 
     private val generativeModel = GenerativeModel(
         modelName = "gemini-2.5-flash",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 
-    suspend fun generateMetadata(text: String): Pair<String, String> {
+    suspend fun generateMetadata(text: String, provider: String = "gemini"): Pair<String, String> {
         return withContext(Dispatchers.IO) {
             try {
                 val prompt = """
@@ -34,13 +36,11 @@ class YouTubeMetadataGenerator @Inject constructor() {
                     }
                 """.trimIndent()
 
-                val response = generativeModel.generateContent(
-                    content {
-                        text(prompt)
-                    }
-                )
-
-                val responseText = response.text ?: throw Exception("Empty response from Gemini")
+                val responseText = if (provider == "anthropic") {
+                    generateAnthropicMetadata(prompt)
+                } else {
+                    generateGeminiMetadata(prompt)
+                }
                 
                 // Extract JSON from response (handling potential markdown formatting)
                 val jsonString = responseText.substringAfter("{").substringBeforeLast("}")
@@ -54,5 +54,27 @@ class YouTubeMetadataGenerator @Inject constructor() {
                 Pair("Error Generated Title", "Could not generate description: ${e.message}")
             }
         }
+    }
+
+    private suspend fun generateGeminiMetadata(prompt: String): String {
+        val response = generativeModel.generateContent(
+            content {
+                text(prompt)
+            }
+        )
+        return response.text ?: throw Exception("Empty response from Gemini")
+    }
+
+    private suspend fun generateAnthropicMetadata(prompt: String): String {
+        val request = AnthropicRequest(
+            model = "claude-3-haiku-20240307",
+            maxTokens = 1024,
+            messages = listOf(AnthropicMessage(role = "user", content = prompt))
+        )
+        val response = anthropicService.generateMessage(
+            apiKey = BuildConfig.ANTHROPIC_API_KEY,
+            request = request
+        )
+        return response.content.firstOrNull()?.text ?: throw Exception("Empty response from Anthropic")
     }
 }

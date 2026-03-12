@@ -854,7 +854,35 @@ fun MainScreen(
                         maxLines = 5
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🤖 AI Powered by:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        
+                        FilterChip(
+                            selected = uiState.metadataProvider == "gemini",
+                            onClick = { viewModel.updateMetadataProvider("gemini") },
+                            label = { Text("Gemini") },
+                            leadingIcon = if (uiState.metadataProvider == "gemini") {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+
+                        FilterChip(
+                            selected = uiState.metadataProvider == "anthropic",
+                            onClick = { viewModel.updateMetadataProvider("anthropic") },
+                            label = { Text("Claude") },
+                            leadingIcon = if (uiState.metadataProvider == "anthropic") {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
 
                     OutlinedButton(
                         onClick = { viewModel.generateMetadata() },

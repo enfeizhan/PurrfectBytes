@@ -233,7 +233,7 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = currentState.copy(isGeneratingMetadata = true, errorMessage = null)
             try {
-                val (title, description) = youtubeMetadataGenerator.generateMetadata(currentState.text)
+                val (title, description) = youtubeMetadataGenerator.generateMetadata(currentState.text, currentState.metadataProvider)
                 
                 _uiState.value = _uiState.value.copy(
                     isGeneratingMetadata = false,
@@ -412,6 +412,10 @@ class MainViewModel @Inject constructor(
 
     fun updateYouTubePrivacy(privacy: String) {
         _uiState.value = _uiState.value.copy(selectedPrivacy = privacy)
+    }
+
+    fun updateMetadataProvider(provider: String) {
+        _uiState.value = _uiState.value.copy(metadataProvider = provider)
     }
 
     fun uploadToYouTube() {
@@ -766,5 +770,6 @@ data class MainUiState(
     val selectedChannelId: String? = null,
     val selectedChannelName: String? = null,
     val showChannelPicker: Boolean = false,
-    val isFetchingChannels: Boolean = false
+    val isFetchingChannels: Boolean = false,
+    val metadataProvider: String = "gemini" // gemini or anthropic
 )

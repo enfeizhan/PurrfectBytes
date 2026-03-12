@@ -42,4 +42,14 @@ object AppModule {
     fun provideTextRecognitionProcessor(@ApplicationContext context: Context): TextRecognitionProcessor {
         return TextRecognitionProcessor(context)
     }
+
+    @Provides
+    @Singleton
+    fun provideAnthropicService(): com.purrfectbytes.android.services.AnthropicService {
+        val retrofit = retrofit2.Retrofit.Builder()
+            .baseUrl("https://api.anthropic.com/")
+            .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create())
+            .build()
+        return retrofit.create(com.purrfectbytes.android.services.AnthropicService::class.java)
+    }
 }
