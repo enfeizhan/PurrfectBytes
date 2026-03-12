@@ -130,25 +130,17 @@ class MainViewModel @Inject constructor(
         "native" to "Android Native TTS - Offline voices"
     )
 
-    companion object {
-        private val KEY_YT_ACCOUNT = stringPreferencesKey("yt_account_name")
-    }
+
 
     init {
         // Initialize TTS service
         viewModelScope.launch {
             ttsService.initialize()
         }
-        // Restore persisted YouTube account
-        viewModelScope.launch {
-            val prefs = context.dataStore.data.first()
-            val savedAccount = prefs[KEY_YT_ACCOUNT]
-            if (!savedAccount.isNullOrBlank()) {
-                _uiState.value = _uiState.value.copy(
-                    isYouTubeConnected = true,
-                    connectedAccountName = savedAccount
-                )
-            }
+        // Restore persisted YouTube connection
+        if (youtubeAuthManager.isAuthorized()) {
+            _uiState.value = _uiState.value.copy(isYouTubeConnected = true)
+            fetchYouTubeChannels()
         }
     }
     
@@ -266,22 +258,10 @@ class MainViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(youtubeDescription = description)
     }
 
-    fun setYouTubeConnected(connected: Boolean, accountName: String? = null) {
+    fun setYouTubeConnected(connected: Boolean) {
         _uiState.value = _uiState.value.copy(
-            isYouTubeConnected = connected,
-            connectedAccountName = accountName
+            isYouTubeConnected = connected
         )
-        // Persist account name to DataStore
-        viewModelScope.launch {
-            context.dataStore.edit { prefs ->
-                if (connected && accountName != null) {
-                    prefs[KEY_YT_ACCOUNT] = accountName
-                } else {
-                    prefs.remove(KEY_YT_ACCOUNT)
-                }
-            }
-        }
-        // Fetch channels after connecting
         if (connected) {
             fetchYouTubeChannels()
         }
