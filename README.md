@@ -314,7 +314,7 @@ Generate title and description for this sentence:
 
 ## 🙏 Acknowledgments
 
-- Built with [Claude Code](https://claude.ai/code)
+- Built with [Antigravity](https://antigravity.google/)
 - Logo designed with AI assistance
 - Inspired by the need for accessible text-to-speech solutions
 - Concatenation feature implemented through collaborative problem-solving
