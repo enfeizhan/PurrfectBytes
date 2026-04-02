@@ -206,15 +206,13 @@ class YouTubeUploadService:
     def _get_service(self):
         """Get an authenticated YouTube API service."""
         creds = self._load_credentials()
+        
+        # _load_credentials already handles refreshing if expired.
+        # If creds is None or still invalid, authentication failed or is missing.
         if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                from google.auth.transport.requests import Request
-                creds.refresh(Request())
-                self._save_credentials(creds)
-            else:
-                raise RuntimeError(
-                    "YouTube is not authenticated. Please connect your YouTube account first."
-                )
+            raise RuntimeError(
+                "YouTube is not authenticated. Please connect your YouTube account first."
+            )
 
         from googleapiclient.discovery import build
         return build("youtube", "v3", credentials=creds)
@@ -236,8 +234,19 @@ class YouTubeUploadService:
             # Try to refresh if expired
             if creds and creds.expired and creds.refresh_token:
                 from google.auth.transport.requests import Request
-                creds.refresh(Request())
-                self._save_credentials(creds)
+                import time
+                
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        creds.refresh(Request())
+                        self._save_credentials(creds)
+                        break
+                    except Exception as refresh_err:
+                        if attempt == max_retries - 1:
+                            raise refresh_err
+                        logger.warning(f"YouTube token refresh attempt {attempt + 1} failed: {refresh_err}. Retrying in 2s...")
+                        time.sleep(2)
 
             self._credentials = creds
             return creds
