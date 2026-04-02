@@ -80,19 +80,40 @@ class TTSService:
             # Check if engine is available
             if not tts_engine.is_available():
                 logger.warning(f"Engine {selected_engine.value} not available, falling back to gTTS")
+                selected_engine = TTSEngine.GTTS
                 tts_engine = TTSEngineFactory.get_engine(
-                    TTSEngine.GTTS,
+                    selected_engine,
                     self.audio_dir,
                     self.audio_config['format']
                 )
             
-            # Generate audio using the selected engine
-            audio_path, duration = tts_engine.generate(
-                text=clean_text,
-                language=language,
-                slow=slow,
-                voice=voice
-            )
+            try:
+                # Generate audio using the selected engine
+                audio_path, duration = tts_engine.generate(
+                    text=clean_text,
+                    language=language,
+                    slow=slow,
+                    voice=voice
+                )
+            except Exception as gen_err:
+                # If engine fails (e.g. edge-tts connection reset), fallback to gTTS if not already using it
+                if selected_engine != TTSEngine.GTTS:
+                    logger.error(f"Engine {selected_engine.value} failed: {gen_err}. Falling back to gTTS.")
+                    selected_engine = TTSEngine.GTTS
+                    tts_engine = TTSEngineFactory.get_engine(
+                        selected_engine,
+                        self.audio_dir,
+                        self.audio_config['format']
+                    )
+                    # Try generating again with gTTS
+                    audio_path, duration = tts_engine.generate(
+                        text=clean_text,
+                        language=language,
+                        slow=slow,
+                        voice=None # gTTS doesn't support voices
+                    )
+                else:
+                    raise gen_err
             
             logger.info(f"Audio generated with {selected_engine.value}: {audio_path.name} ({duration:.2f}s)")
             return audio_path, duration
