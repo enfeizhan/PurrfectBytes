@@ -21,15 +21,15 @@ Identify the language automatically.
 
 CRITICAL: Keep the title under 100 characters (strict limit).
 
-Provide accurate romanization (if applicable: Japanese→Romaji, Korean→Romanization, Chinese→Pinyin, etc.).
+Provide accurate phonetics (if applicable: Japanese→Hiragana, Korean→Romanization, Chinese→Pinyin, etc.). For Japanese, ALWAYS use Hiragana for pronunciations instead of Romaji.
 
 TRANSLATION RULE: If the target sentence is NOT English, you MUST include the "English Translation" section. If the target sentence IS English, you MUST DELETE the "English Translation" section entirely.
 
-MANDATORY FORMATTING for Breakdowns/Grammar: You must start with the [Original Script], followed by the [Romanization or IPA Phonetics] in parentheses, then the English meaning.
+MANDATORY FORMATTING for Breakdowns/Grammar: You must start with the [Original Script], followed by the [Phonetics/Hiragana/Romanization/IPA] in parentheses, then the English meaning.
 
 Example for English Breakdown: Word (IPA Phonetics) = English Meaning.
 
-Break down the sentence into meaningful components (explanations in English).
+Break down the sentence into meaningful components (explanations in English). Ignore overly simple or basic words that even absolute beginners would already know. Focus on the core vocabulary and phrases.
 
 Highlight 2-4 key grammar points (explanations in English).
 
@@ -57,7 +57,7 @@ DESCRIPTION with these sections (don't output DESCRIPTION):
 
 [TARGET_SENTENCE in original language]
 
-([Romanization/IPA if applicable])
+([Phonetics/Hiragana/Romanization/IPA if applicable])
 
 📖 English Translation:[ONLY include this section if the target language is NOT English. If English, remove this entire section]
 
@@ -65,15 +65,15 @@ DESCRIPTION with these sections (don't output DESCRIPTION):
 
 🔤 Breakdown:
 
-• [Original Script] ([Romanization/IPA]) = [Meaning in English]
+• [Original Script] ([Phonetics/Hiragana/Romanization/IPA]) = [Meaning in English]
 
-• [Original Script] ([Romanization/IPA]) = [Meaning in English]
+• [Original Script] ([Phonetics/Hiragana/Romanization/IPA]) = [Meaning in English]
 
 📚 Grammar Points:
 
-• [Original Script] ([Romanization/IPA]) - [Explanation in English]
+• [Original Script] ([Phonetics/Hiragana/Romanization/IPA]) - [Explanation in English]
 
-• [Original Script] ([Romanization/IPA]) - [Explanation in English]
+• [Original Script] ([Phonetics/Hiragana/Romanization/IPA]) - [Explanation in English]
 
 🎯 Perfect for:
 

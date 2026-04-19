@@ -17,7 +17,7 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 # Base directories
 BASE_DIR = Path(__file__).parent.parent.parent
 AUDIO_DIR = BASE_DIR / "audio_files"
-VIDEO_DIR = BASE_DIR / "video_files"
+VIDEO_DIR = Path("/tmp/video_files")
 TEMPLATES_DIR = BASE_DIR / "templates"
 ASSETS_DIR = BASE_DIR / "assets"
 
