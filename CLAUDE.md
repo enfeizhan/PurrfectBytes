@@ -206,7 +206,7 @@ The platform features integrated YouTube upload and SEO metadata generation:
    - Scope: `https://www.googleapis.com/auth/youtube`.
 
 2. **AI Metadata Generation (SEO)**:
-   - Dual provider support: **Google Gemini** (`gemini-2.5-flash`) and **Anthropic Claude** (`claude-sonnet-4-20250514`).
+   - Dual provider support: **Google Gemini** (`gemini-2.5-flash`) and **Anthropic Claude** (`claude-sonnet-4-5-20250929`).
    - Unified prompt template across platforms focusing on "My Study Journal" branding.
    - Robust regex-based parsing for English-first explanations and character-limited titles.
 
