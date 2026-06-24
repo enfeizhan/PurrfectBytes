@@ -155,7 +155,7 @@ class YouTubeMetadataService:
                 "id": "openai",
                 "name": "OpenAI",
                 "available": bool(OPENAI_API_KEY),
-                "model": "gpt-4o-mini",
+                "model": "gpt-5.4-mini",
             },
             {
                 "id": "anthropic",
@@ -188,7 +188,7 @@ class YouTubeMetadataService:
 
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.4-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )
