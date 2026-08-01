@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PurrfectBytes is a multi-platform text-to-speech and video generation platform for language learning, featuring character-level highlighting synchronized with audio. The project consists of:
 
-- **PurrfectBytesWeb/** - FastAPI backend and web interface (Python 3.13+)
+- **PurrfectBytesWeb/** - FastAPI backend and web interface (Python 3.13+, managed with `uv`). Private application running on the developer's desktop only — not deployed, no external users.
 - **PurrfectBytesAndroid/** - Native Android app (Kotlin + Jetpack Compose)
 - **PurrfectBytesiOS/** - Native iOS app (Swift + SwiftUI)
+
+The three applications are independent of each other — changes to one platform don't require changes to the others.
 
 ## Build & Development Commands
 
@@ -17,27 +19,33 @@ PurrfectBytes is a multi-platform text-to-speech and video generation platform f
 **Setup & Dependencies:**
 ```bash
 cd PurrfectBytesWeb
-uv sync                    # Install all dependencies
-uv sync --extra test       # Install with test dependencies
-uv sync --extra dev        # Install with dev dependencies
+uv sync                    # Installs deps + dev group (pytest, httpx, pytest-mock)
+uv sync --extra test       # Adds pytest-cov, pytest-asyncio, pyfakefs
+uv sync --extra dev        # Adds black, isort, flake8, mypy
 ```
 
 **Running the Server:**
 ```bash
-# Development (auto-reload enabled)
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run python main.py      # Serves on 127.0.0.1:9000 (SERVER_HOST/SERVER_PORT in src/config/settings.py)
+                           # DEBUG=true env var enables auto-reload
 
-# Production
-export DEBUG=false
-uv run gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
+# Alternative with explicit port:
+uv run uvicorn main:app --reload --port 9000
 ```
+
+**Environment / Secrets** (in PurrfectBytesWeb/):
+- `.env` — `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` (for YouTube metadata generation)
+- `client_secrets.json` / `youtube_token.json` — YouTube OAuth2 (paths overridable via `YOUTUBE_CLIENT_SECRETS_FILE` / `YOUTUBE_TOKEN_FILE`)
+- Generated media goes to `/tmp/audio_files/` and `/tmp/video_files/` — deliberately in `/tmp` so a reboot flushes it
 
 **Testing:**
 ```bash
-uv run pytest tests/ -v                              # Run all tests
-uv run pytest tests/unit/test_api.py -v             # Run specific test file
-uv run pytest tests/ --cov=src --cov-report=html    # Run with coverage
+uv run pytest tests/ -v                                       # All tests
+uv run pytest tests/unit/services/test_tts_service.py -v      # One file
+uv run pytest tests/unit/services/test_tts_service.py::TestClassName::test_name -v  # One test
+uv run pytest tests/ --cov=src --cov-report=html              # Coverage (needs --extra test)
 ```
+Test layout: `tests/unit/services/`, `tests/unit/utils/`, `tests/integration/test_api.py`. Shared fixtures in `tests/conftest.py`.
 
 **Code Quality:**
 ```bash
@@ -49,256 +57,110 @@ uv run mypy src/            # Type checking
 
 ### Android Application (PurrfectBytesAndroid/)
 
-**Build & Install:**
 ```bash
 cd PurrfectBytesAndroid
 ./gradlew assembleDebug      # Build debug APK
 ./gradlew installDebug       # Install on connected device
-./gradlew assembleRelease    # Build release APK (requires signing config)
-./gradlew bundleRelease      # Create Play Store bundle
+./gradlew test               # Unit tests
+./gradlew connectedAndroidTest   # Instrumented tests
 ```
 
-**Testing:**
-```bash
-./gradlew test                           # Run unit tests
-./gradlew connectedAndroidTest           # Run instrumented tests
-./gradlew createDebugCoverageReport      # Generate coverage report
-```
-
-**Requirements:**
-- Android Studio (Hedgehog or newer)
-- JDK 17
-- Android SDK with API levels 24-34
-- `local.properties` file with SDK path
+Requirements: JDK 17, Android SDK (minSdk 24, compile/targetSdk 34), `local.properties` with SDK path.
 
 ### iOS Application (PurrfectBytesiOS/)
 
 ```bash
-cd PurrfectBytesiOS
-open PurrfectBytes.xcodeproj    # Opens in Xcode
+open PurrfectBytesiOS/PurrfectBytes.xcodeproj
 ```
-
-**Configuration:**
-- Set Bundle Identifier: `com.purrfectbytes.app`
-- Configure team signing in Xcode
-- Update server URL in `APIService.swift` if needed
+Bundle ID `com.purrfectbytes.app`; configure team signing in Xcode. Server URL lives in `Services/APIService.swift`.
 
 ## Architecture
 
 ### Web Application - Layered Service Architecture
 
-The web app follows clean architecture principles with clear separation of concerns:
-
 ```
-routes.py (API endpoints)
-    → services/ (business logic)
-        → utils/ (helpers)
-            → config/ (settings)
+src/api/ (routing only)  →  src/services/ (business logic)  →  src/utils/  →  src/config/settings.py
 ```
 
-**Key Modules:**
-- **src/api/routes.py** - FastAPI endpoints (routing only, no business logic)
-- **src/services/** - Business logic isolated in service classes:
-  - `tts_service.py` - Text-to-speech using gTTS
-  - `video_service.py` - Video generation with character highlighting
-  - `language_detection.py` - Auto-detect language with CJK support
-- **src/models/schemas.py** - Pydantic models for request/response validation
-- **src/utils/** - Reusable utilities:
-  - `text_utils.py` - Text processing and CJK handling
-  - `font_utils.py` - Font management for multilingual support
-  - `logger.py` - Structured logging with request context
-- **src/config/settings.py** - Centralized configuration
+**Routing:** `src/api/routes.py` is only an aggregator — it combines six domain routers, and endpoints live in those modules:
+- `conversion_routes.py` — `/convert`, `/convert-to-video`, `/preview` (returns PNG bytes directly)
+- `language_routes.py` — `/detect-language`, `/tts-engines`, `/tts-voices/{engine}`, `/supported-languages`
+- `repetition_routes.py` — repeat/concatenate audio and video
+- `file_routes.py` — download/delete/cleanup
+- `system_routes.py` — health check
+- `youtube_routes.py` — metadata generation, OAuth, upload, playlists
 
-**Configuration (src/config/settings.py):**
-- Video settings: 1280x720 @ 24fps, font size 48
-- 19+ supported languages with gTTS mapping
-- CJK languages (Chinese, Japanese, Korean) have special handling
-- Auto-cleanup: 24-hour cleanup interval, 7-day file retention
+Heavy handlers (TTS, video generation) are deliberately plain `def`, not `async def` — FastAPI runs them in its threadpool so a long render doesn't block the event loop. Keep new heavy endpoints sync.
+
+**Services (src/services/):**
+- `tts_service.py` + `tts_engines.py` — TTS with pluggable engines behind `BaseTTSEngine` ABC: `gtts` (Google) and `edge` (Microsoft Edge TTS, async API run in a thread). To add an engine, subclass `BaseTTSEngine` and register in the `TTSEngine` enum / `ENGINE_INFO`.
+- `audio_timing.py` — single source of character-timing logic. Edge TTS emits real word timestamps during synthesis (stored as `<audio>.words.json` sidecars) which are interpolated to characters; uniform spacing is the fallback for other engines.
+- `video_service.py` — `VideoService` class: orchestration, concatenation, repetition, cleanup
+- `video_generation.py` — functional core: font loading/fallback, precomputed character layout, frame rendering
+- `language_detection.py` — auto-detect with CJK-specific logic
+- `youtube_metadata_service.py` — LLM metadata generation (see below)
+- `youtube_upload_service.py` — OAuth2 flow + upload
+
+**Utils worth knowing:** `utils/ffmpeg_utils.py` concatenates/repeats videos by ffmpeg stream copy (no re-encode — near-instant); `utils/audio_utils.py` reads audio duration via mutagen (librosa was removed).
+
+**Other layers:** `src/models/schemas.py` (Pydantic request/response models), `src/utils/` (`text_utils.py` CJK handling, `font_utils.py`, `logger.py`, `exceptions.py`), `src/config/settings.py` (all configuration: dirs, video 1280x720@24fps, language maps, cleanup policy).
+
+### Character-Level Video Highlighting (core feature)
+
+1. **Audio** (`tts_service.py`): generate audio via selected engine, return path + duration. Edge TTS also writes a `.words.json` sidecar with real word timestamps.
+2. **Timing** (`audio_timing.py`): word boundaries interpolated to characters (or uniform fallback), with lead time (0.3s) and overlap (0.4s) for smooth transitions
+3. **Rendering** (`video_generation.py`): character layout computed once, static base frame cached, per frame only highlighted characters are redrawn; MoviePy encodes (x264 `veryfast`, all cores)
+4. **Repetition** (`ffmpeg_utils.py`): repeats/concatenation are ffmpeg stream copies of the single render — never re-encode N copies
+
+### CJK (Chinese/Japanese/Korean) Support
+
+- Character-based (not word-based) text wrapping
+- Font selection with fallback probing (`_test_font_supports_text`) — Noto Sans CJK etc.; see `FONTS.md`
+- CJK-specific language detection and character timing
+
+### Repetition & Concatenation
+
+Generate once, concatenate N times (never re-generate): `/repeat-audio`, `/repeat-video`, `/concatenate-audio`, `/concatenate-video`. CLI equivalent: `concatenate.py`.
+
+### YouTube Integration & AI Metadata
+
+- **Metadata providers** (`youtube_metadata_service.py`): `gemini` (gemini-3.5-flash, default), `openai` (gpt-5.4-mini), `anthropic` (claude-sonnet-4-5-20250929). Unified "My Study Journal" prompt template; robust regex parsing (`_parse_response`) guarantees the format regardless of minor AI variance. Android has its own independent implementation (`YouTubeMetadataGenerator.kt`).
+- **Title format**: `My Study Journal: [LANGUAGE] Sentence - "[TEXT]" | Reading & Pronunciation`, guaranteed ≤ 100 chars.
+- **OAuth2**: scope `https://www.googleapis.com/auth/youtube`, persistent token (`youtube_token.json`), endpoints `/youtube/auth-url` → `/oauth2callback` → `/youtube/auth-status`.
+- **Upload**: Education category (27), public/private/unlisted, optional playlist add, FFmpeg `faststart` optimization.
 
 ### Android Application - MVVM + Hilt
 
 ```
-Jetpack Compose UI
-    → ViewModel (StateFlow for state management)
-        → Repository/Services
-            → API/Database
+Compose UI (ui/screens/, ui/components/) → MainViewModel (StateFlow) → services/ → data/remote/PurrfectBytesApi.kt (Retrofit)
 ```
 
-**Key Components:**
-- **ui/screens/** - MainScreen, CameraScreen (Jetpack Compose)
-- **viewmodels/** - MainViewModel with StateFlow for reactive state
-- **services/** - TextRecognitionService (ML Kit), TTSService
-- **di/** - Hilt dependency injection modules
-
-**Technologies:**
-- Jetpack Compose with Material Design 3
-- CameraX for camera access
-- ML Kit for text recognition (including CJK)
-- Media3/ExoPlayer for audio/video playback
-- Retrofit + OkHttp for networking
-- Kotlin Coroutines for async operations
+Notable: the Android app is not a thin client — it has on-device implementations of several web features in `services/`: `EdgeTTSEngine.kt`, `VideoGeneratorService.kt`, `AnthropicService.kt`, `YouTubeAuthManager.kt`/`YouTubeMetadataGenerator.kt`/`YouTubeVideoUploader.kt`, and ML Kit text recognition (`TextRecognitionProcessor.kt`, incl. CJK) fed by CameraX (`CameraScreen.kt`) with clickable text overlays (`ui/components/`). DI modules in `di/AppModule.kt`.
 
 ### iOS Application - MVVM
 
 ```
-SwiftUI Views
-    → ViewModels (@Published properties)
-        → Services (APIService, AuthenticationManager)
-            → URLSession/Keychain
+SwiftUI Views (HomeView, VideoCreationView, HistoryView, LoginView, SettingsView)
+    → TTSViewModel (@Published / Combine)
+        → APIService, AuthenticationManager (Keychain)
 ```
-
-**Key Components:**
-- **Views/** - HomeView, LoginView, HistingsView (SwiftUI)
-- **ViewModels/** - ViewModels with Combine publishers
-- **Services/** - APIService, AuthenticationManager
-
-## Key Features & Implementation Details
-
-### Character-Level Video Highlighting
-
-The core innovation is synchronized character-by-character highlighting in videos:
-
-1. **Audio Generation** (src/services/tts_service.py):
-   - Uses gTTS to generate audio from text
-   - Returns audio file path and duration
-
-2. **Timing Analysis** (src/services/video_service.py):
-   - Uses librosa to analyze audio and calculate per-character timing
-   - Accounts for lead time (0.3s) and overlap (0.4s) for smooth transitions
-   - Special handling for CJK text wrapping
-
-3. **Video Rendering**:
-   - MoviePy for video composition
-   - PIL/Pillow for text rendering with proper fonts
-   - Creates frame-by-frame highlighting synchronized with audio
-
-### CJK (Chinese/Japanese/Korean) Support
-
-Special handling for Asian languages:
-- Character-based text wrapping (not word-based)
-- Proper font selection (Noto Sans CJK, Arial Unicode MS)
-- Language detection with CJK-specific logic
-- Accurate character timing in videos
-
-### Repetition & Concatenation
-
-Efficient content generation with repetition:
-- **Strategy**: Generate once, concatenate multiple times
-- **Endpoints**: `/repeat-audio`, `/repeat-video`, `/concatenate-audio`, `/concatenate-video`
-- **Synchronization**: Perfect timing maintained across all repetitions
-- **CLI Tools**: `concatenate.py` for command-line usage
-
-### Mobile Text Recognition & Metadata
-
-Android app includes ML Kit integration:
-- Camera capture with CameraX
-- Text extraction from photos (including CJK characters)
-- Clickable text overlay on captured images
-- Send extracted text to web API for TTS/video generation
-
-### YouTube Integration & AI Metadata
-
-The platform features integrated YouTube upload and SEO metadata generation:
-
-1. **Authentication**: 
-   - Consistent OAuth2 flow across Web and Android.
-   - Persistent connection state (re-auth not required on every restart).
-   - Scope: `https://www.googleapis.com/auth/youtube`.
-
-2. **AI Metadata Generation (SEO)**:
-   - Dual provider support: **Google Gemini** (`gemini-3.5-flash`) and **Anthropic Claude** (`claude-sonnet-4-5-20250929`).
-   - Unified prompt template across platforms focusing on "My Study Journal" branding.
-   - Robust regex-based parsing for English-first explanations and character-limited titles.
-
-3. **YouTube Video Management**:
-   - Direct upload with Education category (27).
-   - Supports Public, Private, and Unlisted status.
-   - Automated addition to user-selected Playlists.
-   - FFmpeg `faststart` optimization for near-instant YouTube processing.
 
 ## API Endpoints Reference
 
-**Core Conversion:**
-- `POST /detect-language` - Auto-detect text language
-- `POST /convert` - Text → Audio
-- `POST /convert-to-video` - Text → Video with highlighting
-
-**Repetition:**
-- `POST /repeat-audio` - Generate audio and repeat N times
-- `POST /repeat-video` - Generate video and repeat N times
-
-**Concatenation:**
-- `POST /concatenate-audio` - Combine multiple audio files
-- `POST /concatenate-video` - Combine multiple videos
-
-**File Management:**
-- `GET /download/{filename}` - Download audio
-- `GET /download-video/{filename}` - Download video
-- `DELETE /audio/{filename}` - Delete audio
-- `DELETE /video/{filename}` - Delete video
-
-**System:**
-- `GET /health` - Health check with feature status
-- `POST /cleanup` - Clean old files
-
-**Documentation:**
-- `GET /docs` - Swagger UI
-- `GET /redoc` - ReDoc
+- `POST /convert`, `POST /convert-to-video`, `POST /preview`
+- `POST /detect-language`, `GET /tts-engines`, `GET /tts-voices/{engine}`, `GET /supported-languages`
+- `POST /repeat-audio`, `POST /repeat-video`, `POST /concatenate-audio`, `POST /concatenate-video`
+- `GET /download/{filename}`, `GET /download-video/{filename}`, `DELETE /audio/{filename}`, `DELETE /video/{filename}`
+- `POST /generate-youtube-metadata`, `GET /youtube/providers`, `GET /youtube/auth-url`, `GET /oauth2callback`, `GET /youtube/auth-status`, `GET /youtube/playlists`, `POST /youtube/upload`
+- `GET /health`, `POST /cleanup`, `GET /docs` (Swagger), `GET /redoc`
 
 ## Development Guidelines
 
-### When Modifying the Web Application:
+**Web:**
+1. Business logic belongs in `services/`, not route modules; add new endpoints to the matching domain router, not `routes.py`
+2. Use Pydantic models in `schemas.py` for validation; custom exceptions from `utils/exceptions.py`
+3. Use the logger from `utils/logger.py`; new settings go in `config/settings.py`
 
-1. **Service Layer**: Business logic belongs in services/, not routes
-2. **Type Safety**: Use Pydantic models for validation
-3. **Error Handling**: Use custom exceptions from utils/exceptions.py
-4. **Logging**: Use the logger from utils/logger.py with request context
-5. **Configuration**: Add new settings to config/settings.py
-6. **Testing**: Write tests in tests/unit/ or tests/integration/
+**Android:** MVVM with Hilt DI, Kotlin Coroutines/Flow, Compose + Material Design 3, state via StateFlow in ViewModels.
 
-### When Modifying Android:
-
-1. **Architecture**: Follow MVVM pattern
-2. **Dependency Injection**: Use Hilt for dependencies
-3. **Async**: Use Kotlin Coroutines and Flow
-4. **UI**: Use Jetpack Compose with Material Design 3
-5. **State**: Manage state with StateFlow in ViewModels
-
-### When Modifying iOS:
-
-1. **Architecture**: Follow MVVM pattern
-2. **UI**: Use SwiftUI with native components
-3. **Reactive**: Use Combine for reactive programming
-4. **Security**: Use Keychain for sensitive data
-5. **State**: Use @Published properties in ViewModels
-
-## File Locations
-
-**Web App Entry Point:** PurrfectBytesWeb/main.py
-**Android Entry Point:** PurrfectBytesAndroid/app/src/main/java/com/purrfectbytes/android/MainActivity.kt
-**iOS Entry Point:** PurrfectBytesiOS/PurrfectBytes/PurrfectBytesApp.swift
-
-**Configuration Files:**
-- Web: PurrfectBytesWeb/pyproject.toml, src/config/settings.py
-- Android: PurrfectBytesAndroid/app/build.gradle.kts
-- iOS: PurrfectBytesiOS/PurrfectBytes.xcodeproj/project.pbxproj
-
-## Language Support
-
-The platform supports 60+ languages via gTTS. Key supported languages in settings.py:
-- English, Spanish, French, German, Italian, Portuguese, Russian
-- Japanese, Korean, Chinese (Mandarin)
-- Hindi, Arabic, Turkish, Dutch, Polish, Swedish
-- And many more...
-
-Language detection automatically identifies the input language, with special handling for CJK languages.
-
-## YouTube Content Generation
-
-The project features an integrated AI metadata generator (Web/Android) that uses LLMs (Gemini/Claude) to create:
-- **Standardized Titles**: `My Study Journal: [LANGUAGE] Sentence - "[TEXT]" | Reading & Pronunciation` (guaranteed ≤ 100 chars).
-- **Structured Descriptions**: English-first intro, translation (for non-English), character/IPA breakdown, grammar points, and study tips.
-- **Automated Hashtags**: Language-specific tags and discoverability SEO.
-- **BOILERPLATE Integrity**: Automates fixed sections like credit attribution, call-to-actions, and support links.
-
-**Parsing Logic**: Both platforms contain complex regex parsers to guarantee the "Study Journal" format regardless of minor AI variance.
+**iOS:** MVVM, SwiftUI, Combine, Keychain for sensitive data.
