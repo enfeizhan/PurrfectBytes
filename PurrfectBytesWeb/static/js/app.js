@@ -9,11 +9,14 @@ const languageSelect = document.getElementById('language');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const detectionResult = document.getElementById('detectionResult');
 const ttsEngineSelect = document.getElementById('ttsEngine');
+const voiceSelect = document.getElementById('voiceSelect');
 const engineDescription = document.getElementById('engineDescription');
 const engineStatus = document.getElementById('engineStatus');
 
 let detectionTimeout = null;
 let availableEngines = {};
+let lastGeneratedVideoFilename = null;
+let lastUploadedFilename = null;
 
 // Engine descriptions
 const engineDescriptions = {
@@ -22,7 +25,55 @@ const engineDescriptions = {
     'piper': '⚠️ Requires voice models to be downloaded. See piper docs for setup.'
 };
 
-// Check available TTS engines on page load
+// ========== Toast notifications (instead of alert()) ==========
+
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+
+function showToast(message, isError = true) {
+    toastEl.textContent = message;
+    toastEl.className = isError ? 'toast error show' : 'toast show';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4000);
+}
+
+// Read an error message from a fetch Response body ({error} or FastAPI {detail})
+async function errorDetail(response, fallback) {
+    try {
+        const data = await response.json();
+        return data.error || data.detail || fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+// ========== Languages ==========
+
+async function loadLanguages() {
+    try {
+        const response = await fetch('/supported-languages');
+        const data = await response.json();
+        if (!data.languages) return;
+
+        const current = languageSelect.value;
+        const entries = Object.entries(data.languages)
+            .sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+        languageSelect.innerHTML = '';
+        for (const [code, info] of entries) {
+            const opt = document.createElement('option');
+            opt.value = code;
+            opt.textContent = info.name;
+            languageSelect.appendChild(opt);
+        }
+        languageSelect.value = data.languages[current] ? current : 'en';
+    } catch (error) {
+        console.error('Failed to load languages:', error);
+    }
+}
+
+// ========== TTS engines & voices ==========
+
 async function checkEngineAvailability() {
     try {
         const response = await fetch('/tts-engines');
@@ -33,8 +84,6 @@ async function checkEngineAvailability() {
             data.engines.forEach(engine => {
                 availableEngines[engine.id] = engine.available;
             });
-
-            // Update UI to show availability
             updateEngineUI();
         }
     } catch (error) {
@@ -72,11 +121,48 @@ function updateEngineDescription() {
     }
 }
 
-// Listen for engine selection changes
-ttsEngineSelect.addEventListener('change', updateEngineDescription);
+const voiceCache = {};
 
-// Check engines on page load
-document.addEventListener('DOMContentLoaded', checkEngineAvailability);
+async function loadVoices() {
+    const engine = ttsEngineSelect.value;
+    const language = languageSelect.value;
+    const cacheKey = `${engine}:${language}`;
+
+    const applyVoices = (voices) => {
+        voiceSelect.innerHTML = '<option value="">Default voice</option>';
+        voices.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v.id;
+            opt.textContent = v.name;
+            voiceSelect.appendChild(opt);
+        });
+    };
+
+    if (voiceCache[cacheKey]) {
+        applyVoices(voiceCache[cacheKey]);
+        return;
+    }
+
+    voiceSelect.innerHTML = '<option value="">Loading voices…</option>';
+    try {
+        const response = await fetch(`/tts-voices/${engine}?language=${encodeURIComponent(language)}`);
+        const data = await response.json();
+        const voices = data.voices || [];
+        voiceCache[cacheKey] = voices;
+        applyVoices(voices);
+    } catch (error) {
+        console.error('Failed to load voices:', error);
+        voiceSelect.innerHTML = '<option value="">Default voice</option>';
+    }
+}
+
+ttsEngineSelect.addEventListener('change', () => {
+    updateEngineDescription();
+    loadVoices();
+});
+languageSelect.addEventListener('change', loadVoices);
+
+// ========== Language detection ==========
 
 async function detectLanguage(text) {
     if (!text || text.trim().length < 3) {
@@ -96,10 +182,12 @@ async function detectLanguage(text) {
         const data = await response.json();
 
         if (data.language) {
-            // Update language dropdown
+            const previous = languageSelect.value;
             languageSelect.value = data.language;
+            if (languageSelect.value !== previous) {
+                loadVoices();
+            }
 
-            // Show detection result
             detectionResult.innerHTML = `
                 ✓ Detected: <strong>${data.language_name}</strong>
                 ${data.confidence ? `(${Math.round(data.confidence * 100)}% confidence)` : ''}
@@ -132,7 +220,7 @@ textArea.addEventListener('input', function () {
 autoDetectBtn.addEventListener('click', function () {
     const text = textArea.value;
     if (!text.trim()) {
-        alert('Please enter some text first');
+        showToast('Please enter some text first');
         return;
     }
 
@@ -145,6 +233,8 @@ autoDetectBtn.addEventListener('click', function () {
     });
 });
 
+// ========== Conversion ==========
+
 async function handleConversion(endpoint, isVideo = false) {
     const button = isVideo ? videoBtn : audioBtn;
     button.classList.add('loading');
@@ -152,29 +242,31 @@ async function handleConversion(endpoint, isVideo = false) {
     audioBtn.disabled = true;
     videoBtn.disabled = true;
 
+    // Show elapsed time while the server generates (video can take a while)
+    const startTime = Date.now();
+    resultDiv.className = 'result show';
+    resultDiv.innerHTML = `<p>⏳ Generating ${isVideo ? 'video' : 'audio'}… <span id="elapsedSeconds">0</span>s elapsed</p>`;
+    const elapsedTimer = setInterval(() => {
+        const el = document.getElementById('elapsedSeconds');
+        if (el) el.textContent = Math.round((Date.now() - startTime) / 1000);
+    }, 1000);
+
     const formData = new FormData();
     const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
     const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
-    const engine = ttsEngineSelect.value;
 
-    // Manually add all form values to ensure proper handling
-    formData.append('text', document.getElementById('text').value);
-    formData.append('language', document.getElementById('language').value);
+    formData.append('text', textArea.value);
+    formData.append('language', languageSelect.value);
     formData.append('slow', document.getElementById('slow').checked ? 'true' : 'false');
     formData.append('repetitions', repetitions);
-    formData.append('engine', engine);
-    console.log('Using TTS engine:', engine);
+    formData.append('engine', ttsEngineSelect.value);
+    if (voiceSelect.value) {
+        formData.append('voice', voiceSelect.value);
+    }
 
-    // For video conversion, ensure font_size and show_qr_code are included
     if (isVideo) {
-        formData.delete('font_size');
         formData.append('font_size', fontSize);
-        console.log('Sending font_size:', fontSize);
-
-        const showQrCode = document.getElementById('showQrCode').checked;
-        formData.delete('show_qr_code');
-        formData.append('show_qr_code', showQrCode ? 'true' : 'false');
-        console.log('Sending show_qr_code:', showQrCode);
+        formData.append('show_qr_code', document.getElementById('showQrCode').checked ? 'true' : 'false');
     }
 
     try {
@@ -187,10 +279,17 @@ async function handleConversion(endpoint, isVideo = false) {
 
         if (data.success) {
             resultDiv.className = 'result success show';
+            const isRepeat = repetitions > 1;
+
             if (isVideo) {
                 const videoUrl = data.video_url || data.download_url;
                 const audioUrl = data.audio_url;
-                const isRepeat = repetitions > 1;
+
+                // Track for the YouTube upload section
+                if (data.video_filename) {
+                    lastGeneratedVideoFilename = data.video_filename;
+                    updateUploadButton();
+                }
 
                 resultDiv.innerHTML = `
                     <h3>🎬 Video Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
@@ -200,7 +299,7 @@ async function handleConversion(endpoint, isVideo = false) {
                         <source src="${videoUrl}" type="video/mp4">
                         Your browser does not support the video element.
                     </video>
-                    <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <div class="button-row" style="margin-top: 15px;">
                         <a href="${videoUrl}" download class="download-btn" style="flex: 1;">
                             📥 Download Video
                         </a>
@@ -211,7 +310,6 @@ async function handleConversion(endpoint, isVideo = false) {
                 `;
             } else {
                 const audioUrl = data.audio_url || data.download_url;
-                const isRepeat = repetitions > 1;
 
                 resultDiv.innerHTML = `
                     <h3>✅ Audio Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
@@ -226,11 +324,13 @@ async function handleConversion(endpoint, isVideo = false) {
                     </a>
                 `;
             }
+
+            loadRecentFiles();
         } else {
             resultDiv.className = 'result error show';
             resultDiv.innerHTML = `
                 <h3>❌ Error</h3>
-                <p>${data.error || 'An error occurred during conversion.'}</p>
+                <p>${data.error || data.detail || 'An error occurred during conversion.'}</p>
             `;
         }
     } catch (error) {
@@ -240,6 +340,7 @@ async function handleConversion(endpoint, isVideo = false) {
             <p>Failed to connect to the server. Please try again.</p>
         `;
     } finally {
+        clearInterval(elapsedTimer);
         button.classList.remove('loading');
         button.disabled = false;
         audioBtn.disabled = false;
@@ -249,7 +350,9 @@ async function handleConversion(endpoint, isVideo = false) {
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    handleConversion('/convert', false);
+    // Repetitions on audio are handled by the /repeat-audio endpoint
+    const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
+    handleConversion(repetitions > 1 ? '/repeat-audio' : '/convert', false);
 });
 
 videoBtn.addEventListener('click', async (e) => {
@@ -261,10 +364,12 @@ videoBtn.addEventListener('click', async (e) => {
     handleConversion('/convert-to-video', true);
 });
 
-// Preview button handler
+// ========== Preview ==========
+
 const previewBtn = document.getElementById('previewBtn');
 const previewContainer = document.getElementById('previewContainer');
 const previewImage = document.getElementById('previewImage');
+let previewObjectUrl = null;
 
 previewBtn.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -274,19 +379,14 @@ previewBtn.addEventListener('click', async (e) => {
         return;
     }
 
-    // Show loading state
     previewBtn.classList.add('loading');
     previewBtn.disabled = true;
     previewContainer.style.display = 'none';
 
-    const formData = new FormData(form);
-    const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
-    const showQrCode = document.getElementById('showQrCode').checked;
-
-    formData.delete('font_size');
-    formData.append('font_size', fontSize);
-    formData.delete('show_qr_code');
-    formData.append('show_qr_code', showQrCode ? 'true' : 'false');
+    const formData = new FormData();
+    formData.append('text', textArea.value);
+    formData.append('font_size', parseInt(document.getElementById('fontSize').value) || 48);
+    formData.append('show_qr_code', document.getElementById('showQrCode').checked ? 'true' : 'false');
     formData.append('highlight_position', 0);  // Highlight first character
 
     try {
@@ -295,23 +395,22 @@ previewBtn.addEventListener('click', async (e) => {
             body: formData
         });
 
-        const data = await response.json();
-
-        if (data.success && data.preview_url) {
-            // Show preview image
-            previewImage.innerHTML = `
-                <img src="${data.preview_url}" alt="Video Preview" style="max-width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            `;
+        if (response.ok) {
+            // The server returns the PNG directly — no file round-trip
+            const blob = await response.blob();
+            if (previewObjectUrl) {
+                URL.revokeObjectURL(previewObjectUrl);
+            }
+            previewObjectUrl = URL.createObjectURL(blob);
+            previewImage.innerHTML = `<img src="${previewObjectUrl}" alt="Video Preview">`;
             previewContainer.style.display = 'block';
-
-            // Scroll to preview
             previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
-            alert(`Preview failed: ${data.error || 'Unknown error'}`);
+            showToast(`Preview failed: ${await errorDetail(response, 'Unknown error')}`);
         }
     } catch (error) {
         console.error('Preview error:', error);
-        alert('Failed to generate preview. Please try again.');
+        showToast('Failed to generate preview. Please try again.');
     } finally {
         previewBtn.classList.remove('loading');
         previewBtn.disabled = false;
@@ -327,30 +426,110 @@ fontSizeSelect.addEventListener('change', function () {
     }
 });
 
-// ========== YouTube Metadata & Upload ==========
+// ========== Recent files ==========
 
-let lastGeneratedVideoFilename = null;
+const fileList = document.getElementById('fileList');
+const refreshFilesBtn = document.getElementById('refreshFilesBtn');
 
-// Track generated video filename from video conversion responses
-const originalHandleConversion = handleConversion;
-
-// Store video filename when a video is generated
-const _origFetch = window.fetch;
-// We'll capture the video filename from the result display instead
-
-// Copy to clipboard
-function copyToClipboard(elementId) {
-    const el = document.getElementById(elementId);
-    const text = el.textContent || el.innerText;
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = el.closest('.metadata-field').querySelector('.copy-btn');
-        const original = btn.textContent;
-        btn.textContent = '✅ Copied!';
-        setTimeout(() => btn.textContent = original, 1500);
-    });
+function formatSize(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    if (bytes >= 1024) return Math.round(bytes / 1024) + ' KB';
+    return bytes + ' B';
 }
 
-// Generate YouTube metadata
+// Turn "repeat_3x_Practice-makes-perfect_a1b2c3d4.mp4" into "3× Practice makes perfect"
+function displayName(filename) {
+    let name = filename.replace(/\.[a-z0-9]+$/i, '');   // drop extension
+    let repeat = '';
+
+    const repMatch = name.match(/^repeat_(\d+)x_/);
+    if (repMatch) {
+        repeat = `${repMatch[1]}× `;
+        name = name.slice(repMatch[0].length);
+    }
+
+    name = name.replace(/^(edge|gtts|piper|concat)_/, '');
+    name = name.replace(/_[0-9a-f]{8}$/, '');           // drop unique suffix
+
+    // Old-style pure-UUID filenames: nothing readable to extract
+    if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(name) || !name) {
+        return repeat + filename;
+    }
+
+    return repeat + name.replace(/-/g, ' ');
+}
+
+async function loadRecentFiles() {
+    try {
+        const response = await fetch('/files');
+        const data = await response.json();
+        if (!data.success) return;
+
+        if (!data.files.length) {
+            fileList.innerHTML = '<p class="hint">No files yet — generate some audio or video above.</p>';
+            return;
+        }
+
+        fileList.innerHTML = '';
+        data.files.forEach(file => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+
+            const icon = document.createElement('span');
+            icon.textContent = file.kind === 'video' ? '🎬' : '🎵';
+
+            const name = document.createElement('span');
+            name.className = 'file-name';
+            name.textContent = displayName(file.filename);
+            name.title = file.filename;
+
+            const meta = document.createElement('span');
+            meta.className = 'file-meta';
+            meta.textContent = `${formatSize(file.size)} · ${new Date(file.modified * 1000).toLocaleString()}`;
+
+            const download = document.createElement('a');
+            download.href = file.url;
+            download.download = file.filename;
+            download.textContent = '📥 Download';
+
+            item.append(icon, name, meta, download);
+
+            if (file.kind === 'video') {
+                const useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.textContent = '📤 Use for upload';
+                useBtn.addEventListener('click', () => {
+                    lastGeneratedVideoFilename = file.filename;
+                    updateUploadButton();
+                    showToast(`Selected for upload: ${file.filename}`, false);
+                });
+                item.append(useBtn);
+            }
+
+            fileList.appendChild(item);
+        });
+    } catch (error) {
+        console.error('Failed to load recent files:', error);
+    }
+}
+
+refreshFilesBtn.addEventListener('click', loadRecentFiles);
+
+// ========== YouTube Metadata ==========
+
+// Copy to clipboard
+document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const el = document.getElementById(btn.dataset.copyTarget);
+        const text = el.textContent || el.innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            const original = btn.textContent;
+            btn.textContent = '✅ Copied!';
+            setTimeout(() => btn.textContent = original, 1500);
+        });
+    });
+});
+
 const generateMetadataBtn = document.getElementById('generateMetadataBtn');
 const metadataResult = document.getElementById('metadataResult');
 const metadataTitle = document.getElementById('metadataTitle');
@@ -360,7 +539,7 @@ const llmProvider = document.getElementById('llmProvider');
 generateMetadataBtn.addEventListener('click', async () => {
     const text = textArea.value.trim();
     if (!text) {
-        alert('Please enter some text first');
+        showToast('Please enter some text first');
         return;
     }
 
@@ -385,14 +564,13 @@ generateMetadataBtn.addEventListener('click', async () => {
             metadataResult.style.display = 'block';
             metadataResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-            // Enable upload button if authenticated
             updateUploadButton();
         } else {
-            alert(`Generation failed: ${data.error}`);
+            showToast(`Generation failed: ${data.error || data.detail || 'Unknown error'}`);
         }
     } catch (error) {
         console.error('Metadata generation error:', error);
-        alert('Failed to generate metadata. Please check your API key and try again.');
+        showToast('Failed to generate metadata. Please check your API key and try again.');
     } finally {
         generateMetadataBtn.classList.remove('loading');
         generateMetadataBtn.disabled = false;
@@ -406,17 +584,32 @@ async function checkProviderAvailability() {
         const data = await response.json();
         if (data.success) {
             const providerStatus = document.getElementById('providerStatus');
-            const statuses = data.providers.map(p =>
-                `${p.available ? '✅' : '❌'} ${p.name}`
-            ).join(' | ');
+            const availability = {};
+            const statuses = data.providers.map(p => {
+                availability[p.id] = p.available;
+                return `${p.available ? '✅' : '❌'} ${p.name}`;
+            }).join(' | ');
             providerStatus.innerHTML = statuses;
+
+            // Disable unavailable providers instead of failing on request
+            let firstAvailable = null;
+            for (const opt of llmProvider.options) {
+                opt.disabled = availability[opt.value] === false;
+                if (!opt.disabled && firstAvailable === null) {
+                    firstAvailable = opt.value;
+                }
+            }
+            if (llmProvider.selectedOptions[0]?.disabled && firstAvailable) {
+                llmProvider.value = firstAvailable;
+            }
         }
     } catch (e) {
         console.error('Failed to check providers:', e);
     }
 }
 
-// YouTube OAuth
+// ========== YouTube OAuth & Upload ==========
+
 const connectYoutubeBtn = document.getElementById('connectYoutubeBtn');
 const youtubeAuthStatus = document.getElementById('youtubeAuthStatus');
 const uploadControls = document.getElementById('uploadControls');
@@ -433,10 +626,10 @@ connectYoutubeBtn.addEventListener('click', async () => {
             // Open auth URL in a new window
             window.open(data.auth_url, 'youtube-auth', 'width=600,height=700');
         } else {
-            alert(`YouTube setup error: ${data.error}`);
+            showToast(`YouTube setup error: ${data.error || 'unknown'}`);
         }
     } catch (error) {
-        alert('Failed to start YouTube authentication');
+        showToast('Failed to start YouTube authentication');
     } finally {
         connectYoutubeBtn.classList.remove('loading');
         connectYoutubeBtn.disabled = false;
@@ -497,24 +690,26 @@ function updateUploadButton() {
     const uploadBtn = document.getElementById('uploadYoutubeBtn');
     const hasVideo = lastGeneratedVideoFilename !== null;
     const hasMetadata = metadataResult.style.display !== 'none';
+    const alreadyUploaded = hasVideo && lastGeneratedVideoFilename === lastUploadedFilename;
 
-    uploadBtn.disabled = !(hasVideo && hasMetadata);
+    uploadBtn.disabled = !(hasVideo && hasMetadata) || alreadyUploaded;
     if (!hasVideo) {
-        uploadBtn.title = 'Generate a video first';
+        uploadBtn.title = 'Generate a video first (or pick one from Recent Files)';
     } else if (!hasMetadata) {
         uploadBtn.title = 'Generate YouTube metadata first';
+    } else if (alreadyUploaded) {
+        uploadBtn.title = 'This video was already uploaded — select or generate another one';
     } else {
         uploadBtn.title = '';
     }
 }
 
-// Upload to YouTube
 const uploadYoutubeBtn = document.getElementById('uploadYoutubeBtn');
 const uploadResult = document.getElementById('uploadResult');
 
 uploadYoutubeBtn.addEventListener('click', async () => {
     if (!lastGeneratedVideoFilename) {
-        alert('Please generate a video first');
+        showToast('Please generate a video first');
         return;
     }
 
@@ -530,8 +725,8 @@ uploadYoutubeBtn.addEventListener('click', async () => {
         formData.append('playlist_id', document.getElementById('playlistSelect').value);
         formData.append('privacy_status', document.getElementById('privacyStatus').value);
 
-        // Extract tags from description hashtags
-        const hashtags = metadataDescription.textContent.match(/#\w+/g);
+        // Extract tags from description hashtags (unicode-aware for CJK tags)
+        const hashtags = metadataDescription.textContent.match(/#[\p{L}\p{N}_]+/gu);
         if (hashtags) {
             formData.append('tags', hashtags.map(h => h.slice(1)).join(','));
         }
@@ -544,6 +739,7 @@ uploadYoutubeBtn.addEventListener('click', async () => {
         const data = await response.json();
 
         if (data.success) {
+            lastUploadedFilename = lastGeneratedVideoFilename;
             uploadResult.innerHTML = `
                 ✅ <strong>Uploaded successfully!</strong><br>
                 <a href="${data.video_url}" target="_blank" style="color: #667eea;">
@@ -551,45 +747,22 @@ uploadYoutubeBtn.addEventListener('click', async () => {
                 </a>
             `;
         } else {
-            uploadResult.innerHTML = `❌ Upload failed: ${data.error}`;
+            uploadResult.innerHTML = `❌ Upload failed: ${data.error || data.detail || 'Unknown error'}`;
         }
     } catch (error) {
         uploadResult.innerHTML = '❌ Upload failed. Please try again.';
     } finally {
         uploadYoutubeBtn.classList.remove('loading');
-        uploadYoutubeBtn.disabled = false;
+        updateUploadButton();
     }
 });
 
-// Intercept video conversion to capture filename
-const _originalHandleConversion = window.handleConversion;
+// ========== Init ==========
 
-// Override the global handleConversion to also track video filenames
-(function () {
-    const origMethod = handleConversion;
-
-    // Patch: after video success, extract the video filename from the URL
-    const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            if (mutation.type === 'childList' && resultDiv.classList.contains('success')) {
-                const videoSource = resultDiv.querySelector('video source');
-                if (videoSource) {
-                    const src = videoSource.getAttribute('src');
-                    // Extract filename from URL like /download-video/filename.mp4
-                    const match = src.match(/\/download-video\/(.+)$/);
-                    if (match) {
-                        lastGeneratedVideoFilename = match[1];
-                        updateUploadButton();
-                    }
-                }
-            }
-        }
-    });
-    observer.observe(resultDiv, { childList: true, subtree: true });
-})();
-
-// Initialize YouTube features on page load
 document.addEventListener('DOMContentLoaded', () => {
+    loadLanguages().then(loadVoices);
+    checkEngineAvailability();
     checkProviderAvailability();
     checkYouTubeAuth();
+    loadRecentFiles();
 });

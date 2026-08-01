@@ -36,7 +36,7 @@ class ConcatenateVideoRequest(BaseModel):
 
 
 @router.post("/repeat-audio")
-async def repeat_audio_endpoint(
+def repeat_audio_endpoint(
     text: str = Form(...),
     repetitions: int = Form(10),
     language: str = Form("en"),
@@ -73,8 +73,8 @@ async def repeat_audio_endpoint(
 
             return ConversionResult(
                 success=True,
-                filename=filename,
-                download_url=f"/download/audio/{filename}",
+                audio_filename=filename,
+                audio_url=f"/download/{filename}",
                 duration=total_duration,
                 message=f"Audio generated and repeated {repetitions} times"
             )
@@ -85,7 +85,7 @@ async def repeat_audio_endpoint(
 
 
 @router.post("/repeat-video")
-async def repeat_video_endpoint(
+def repeat_video_endpoint(
     text: str = Form(...),
     repetitions: int = Form(10),
     language: str = Form("en"),
@@ -123,15 +123,13 @@ async def repeat_video_endpoint(
                 voice=voice
             )
 
-            audio_analysis = tts_service.analyze_audio_timing(text, single_audio_path)
-
             # Use the styled video generation function
             from src.services.video_generation import create_video_with_text
             import uuid as uuid_module
-            from moviepy.video.io.VideoFileClip import VideoFileClip
-            from moviepy import concatenate_videoclips
+            from src.utils.ffmpeg_utils import repeat_copy
+            from src.utils.text_utils import filename_slug
 
-            single_video_filename = f"{uuid_module.uuid4()}.mp4"
+            single_video_filename = f"{filename_slug(text)}_{uuid_module.uuid4().hex[:8]}.mp4"
             single_video_path = VIDEO_DIR / single_video_filename
 
             logger.info(f"Generating video with character highlighting (font_size={font_size})")
@@ -139,28 +137,11 @@ async def repeat_video_endpoint(
 
             if repetitions > 1:
                 try:
-                    single_clip = VideoFileClip(str(single_video_path))
-                    clips = [single_clip] * repetitions
-                    final_clip = concatenate_videoclips(clips, method="compose")
-
-                    repeat_filename = f"repeat_{repetitions}x_{uuid_module.uuid4()}.mp4"
-                    video_path = VIDEO_DIR / repeat_filename
-
-                    final_clip.write_videofile(
-                        str(video_path),
-                        fps=24,
-                        codec='libx264',
-                        audio_codec='aac',
-                        temp_audiofile='temp-audio.m4a',
-                        remove_temp=True,
-                        logger=None
-                    )
-
-                    single_clip.close()
-                    final_clip.close()
+                    repeat_filename = f"repeat_{repetitions}x_{filename_slug(text)}_{uuid_module.uuid4().hex[:8]}.mp4"
+                    video_path = repeat_copy(single_video_path, repetitions, VIDEO_DIR / repeat_filename)
                     single_video_path.unlink()
                 except Exception as concat_error:
-                    logger.warning(f"Concatenation failed, using single video: {concat_error}")
+                    logger.warning(f"Repetition failed, using single video: {concat_error}")
                     video_path = single_video_path
             else:
                 video_path = single_video_path
@@ -178,23 +159,23 @@ async def repeat_video_endpoint(
             return {
                 "success": True,
                 "filename": filename,
-                "video_url": f"/download/video/{filename}",
+                "video_url": f"/download-video/{filename}",
                 "duration": audio_duration,
                 "message": f"Video generated and repeated {repetitions} times"
             }
 
         except Exception as e:
             log_error(logger, e, "video repetition")
-            if 'audio_path' in locals() and audio_path.exists():
+            if 'single_audio_path' in locals() and single_audio_path.exists():
                 try:
-                    audio_path.unlink()
+                    single_audio_path.unlink()
                 except OSError:
                     pass
             raise HTTPException(status_code=500, detail=f"Video repetition failed: {str(e)}")
 
 
 @router.post("/concatenate-audio")
-async def concatenate_audio_endpoint(request: ConcatenateAudioRequest):
+def concatenate_audio_endpoint(request: ConcatenateAudioRequest):
     """Generate and concatenate multiple audio files from texts."""
     with RequestLogger(logger, "audio concatenation"):
         try:
@@ -222,7 +203,7 @@ async def concatenate_audio_endpoint(request: ConcatenateAudioRequest):
                 "individual_files": [p.name for p in individual_paths],
                 "total_duration": total_duration,
                 "file_count": len(individual_paths),
-                "download_url": f"/download/audio/{concat_path.name}"
+                "download_url": f"/download/{concat_path.name}"
             }
 
         except Exception as e:
@@ -231,7 +212,7 @@ async def concatenate_audio_endpoint(request: ConcatenateAudioRequest):
 
 
 @router.post("/concatenate-video")
-async def concatenate_video_endpoint(request: ConcatenateVideoRequest):
+def concatenate_video_endpoint(request: ConcatenateVideoRequest):
     """Generate and concatenate multiple video files from texts."""
     with RequestLogger(logger, "video concatenation"):
         try:
@@ -276,7 +257,7 @@ async def concatenate_video_endpoint(request: ConcatenateVideoRequest):
                 "concatenated_file": concat_path.name,
                 "individual_files": [p.name for p in individual_paths],
                 "file_count": len(individual_paths),
-                "download_url": f"/download/video/{concat_path.name}"
+                "download_url": f"/download-video/{concat_path.name}"
             }
 
         except Exception as e:

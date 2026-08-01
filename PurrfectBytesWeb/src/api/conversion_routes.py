@@ -1,8 +1,15 @@
-"""Conversion API routes — text-to-audio and text-to-video endpoints."""
+"""Conversion API routes — text-to-audio and text-to-video endpoints.
 
+Handlers are plain `def` on purpose: FastAPI runs them in its threadpool, so
+long TTS/video generation doesn't block the event loop and the server stays
+responsive while a video renders.
+"""
+
+import io
 import uuid
 
 from fastapi import APIRouter, Form, HTTPException
+from fastapi.responses import Response
 from typing import Optional
 
 from src.models.schemas import ConversionResult
@@ -21,7 +28,7 @@ router = APIRouter()
 
 
 @router.post("/convert", response_model=ConversionResult)
-async def convert_to_audio(
+def convert_to_audio(
     text: str = Form(...),
     language: str = Form("en"),
     slow: bool = Form(False),
@@ -57,7 +64,7 @@ async def convert_to_audio(
 
 
 @router.post("/convert-to-video", response_model=ConversionResult)
-async def convert_to_video(
+def convert_to_video(
     text: str = Form(...),
     language: str = Form("en"),
     slow: bool = Form(False),
@@ -85,8 +92,6 @@ async def convert_to_video(
                 logger.warning(f"Repetitions {repetitions} out of range, using 1")
                 repetitions = 1
 
-            logger.info(f"Received: font_size={font_size}, repetitions={repetitions}")
-
             engine_enum = TTSService.parse_engine(engine)
 
             logger.info(f"Generating audio for video with engine={engine}")
@@ -94,16 +99,11 @@ async def convert_to_video(
                 text, language, slow, engine=engine_enum, voice=voice
             )
 
-            logger.info("Analyzing audio timing")
-            audio_analysis = tts_service.analyze_audio_timing(text, audio_path)
-
-            # Use the styled video generation function
             from src.services.video_generation import create_video_with_text
-            import uuid as uuid_module
-            from moviepy.video.io.VideoFileClip import VideoFileClip
-            from moviepy import concatenate_videoclips
+            from src.utils.ffmpeg_utils import repeat_copy
+            from src.utils.text_utils import filename_slug
 
-            single_video_filename = f"{uuid_module.uuid4()}.mp4"
+            single_video_filename = f"{filename_slug(text)}_{uuid.uuid4().hex[:8]}.mp4"
             single_video_path = VIDEO_DIR / single_video_filename
 
             logger.info(f"Generating video with character highlighting (font_size={font_size})")
@@ -111,32 +111,14 @@ async def convert_to_video(
 
             if repetitions > 1:
                 try:
-                    logger.info(f"Concatenating video {repetitions} times")
-                    single_clip = VideoFileClip(str(single_video_path))
-                    clips = [single_clip] * repetitions
-                    final_clip = concatenate_videoclips(clips, method="compose")
-
-                    concat_filename = f"repeat_{repetitions}x_{uuid_module.uuid4()}.mp4"
-                    video_path = VIDEO_DIR / concat_filename
-
-                    final_clip.write_videofile(
-                        str(video_path),
-                        fps=24,
-                        codec='libx264',
-                        audio_codec='aac',
-                        temp_audiofile='temp-audio.m4a',
-                        remove_temp=True,
-                        logger=None
-                    )
-
-                    duration = single_clip.duration * repetitions
-                    single_clip.close()
-                    final_clip.close()
+                    logger.info(f"Repeating video {repetitions}x via stream copy")
+                    concat_filename = f"repeat_{repetitions}x_{filename_slug(text)}_{uuid.uuid4().hex[:8]}.mp4"
+                    video_path = repeat_copy(single_video_path, repetitions, VIDEO_DIR / concat_filename)
+                    duration = duration * repetitions
                     single_video_path.unlink()
-
-                    logger.info(f"Concatenated video: {video_path.name}")
+                    logger.info(f"Repeated video: {video_path.name}")
                 except Exception as concat_error:
-                    logger.warning(f"Concatenation failed: {concat_error}, using single video")
+                    logger.warning(f"Repetition failed: {concat_error}, using single video")
                     video_path = single_video_path
             else:
                 video_path = single_video_path
@@ -173,7 +155,7 @@ async def convert_to_video(
 
 
 @router.post("/preview")
-async def generate_preview(
+def generate_preview(
     text: str = Form(...),
     font_size: int = Form(48),
     show_qr_code: bool = Form(False),
@@ -191,15 +173,10 @@ async def generate_preview(
 
         preview_img = create_preview_frame(text, font_size, show_qr_code, highlight_position)
 
-        preview_filename = f"preview_{uuid.uuid4()}.png"
-        preview_path = VIDEO_DIR / preview_filename
-        preview_img.save(str(preview_path), format='PNG')
+        buffer = io.BytesIO()
+        preview_img.save(buffer, format='PNG')
 
-        return {
-            "success": True,
-            "preview_url": f"/download-video/{preview_filename}",
-            "message": "Preview generated successfully"
-        }
+        return Response(content=buffer.getvalue(), media_type="image/png")
     except Exception as e:
         log_error(logger, e, "preview generation")
         raise HTTPException(

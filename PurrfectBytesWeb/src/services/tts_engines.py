@@ -4,7 +4,6 @@ This module provides a unified interface for different TTS engines:
 - gTTS (Google Text-to-Speech) - Original, simple but monotonic
 - Edge-TTS (Microsoft Edge) - Natural neural voices, free
 - Piper - Offline neural TTS, fast and natural
-- Coqui TTS - Open source, highly customizable
 """
 
 import asyncio
@@ -15,6 +14,8 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 from enum import Enum
 
+from src.services.audio_timing import save_word_boundaries
+from src.utils.audio_utils import get_audio_duration
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,20 +87,16 @@ class BaseTTSEngine(ABC):
         """Check if this engine is available/installed."""
         pass
     
-    def _generate_filename(self, prefix: str = "") -> str:
-        """Generate a unique filename for audio output."""
-        return f"{prefix}{uuid.uuid4()}.{self.audio_format}"
+    def _generate_filename(self, prefix: str = "", text: str = "") -> str:
+        """Generate a unique, human-readable filename for audio output."""
+        from src.utils.text_utils import filename_slug
+
+        slug = f"{filename_slug(text)}_" if text else ""
+        return f"{prefix}{slug}{uuid.uuid4().hex[:8]}.{self.audio_format}"
     
     def _get_duration(self, audio_path: Path) -> float:
-        """Get audio duration using librosa."""
-        try:
-            import librosa
-            y, sr = librosa.load(str(audio_path))
-            return librosa.get_duration(y=y, sr=sr)
-        except Exception as e:
-            logger.warning(f"Could not get audio duration: {e}")
-            # Fallback estimation
-            return len(audio_path.read_bytes()) / 16000
+        """Get audio duration in seconds."""
+        return get_audio_duration(audio_path)
 
 
 class GTTSEngine(BaseTTSEngine):
@@ -114,7 +111,7 @@ class GTTSEngine(BaseTTSEngine):
     ) -> Tuple[Path, float]:
         from gtts import gTTS
         
-        audio_filename = self._generate_filename("gtts_")
+        audio_filename = self._generate_filename("gtts_", text)
         audio_path = self.audio_dir / audio_filename
         
         try:
@@ -193,31 +190,48 @@ class EdgeTTSEngine(BaseTTSEngine):
         # Adjust rate for slow speech
         rate = "-20%" if slow else "+0%"
         
-        audio_filename = self._generate_filename("edge_")
+        audio_filename = self._generate_filename("edge_", text)
         audio_path = self.audio_dir / audio_filename
         
         try:
-            # Define the async generation function
+            # Stream synthesis so we can capture WordBoundary events — real
+            # word-level timestamps used for accurate highlight timing.
             async def _generate():
-                communicate = edge_tts.Communicate(text, selected_voice, rate=rate)
-                await communicate.save(str(audio_path))
-            
+                communicate = edge_tts.Communicate(
+                    text, selected_voice, rate=rate, boundary="WordBoundary"
+                )
+                boundaries = []
+                with open(audio_path, "wb") as audio_file:
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_file.write(chunk["data"])
+                        elif chunk["type"] == "WordBoundary":
+                            # Offsets are in 100-nanosecond ticks
+                            boundaries.append({
+                                "word": chunk["text"],
+                                "start": chunk["offset"] / 1e7,
+                                "end": (chunk["offset"] + chunk["duration"]) / 1e7,
+                            })
+                return boundaries
+
             # Run async code in a new event loop in a separate thread
             # This avoids the "cannot call asyncio.run from running event loop" error
             def run_in_thread():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    loop.run_until_complete(_generate())
+                    return loop.run_until_complete(_generate())
                 finally:
                     loop.close()
-            
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_thread)
-                future.result(timeout=60)  # Wait for completion with timeout
-            
+                word_boundaries = future.result(timeout=60)  # Wait for completion with timeout
+
+            save_word_boundaries(audio_path, word_boundaries)
+
             duration = self._get_duration(audio_path)
-            logger.info(f"Edge-TTS generated: {audio_filename} ({duration:.2f}s) voice={selected_voice}")
+            logger.info(f"Edge-TTS generated: {audio_filename} ({duration:.2f}s) voice={selected_voice}, {len(word_boundaries)} word boundaries")
             return audio_path, duration
             
         except Exception as e:
@@ -386,7 +400,7 @@ class PiperTTSEngine(BaseTTSEngine):
                 f"Download models from https://huggingface.co/rhasspy/piper-voices and place .onnx files in ~/.local/share/piper-voices/"
             )
         
-        audio_filename = self._generate_filename("piper_")
+        audio_filename = self._generate_filename("piper_", text)
         audio_path = self.audio_dir / audio_filename
         
         try:

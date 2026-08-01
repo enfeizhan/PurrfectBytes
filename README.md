@@ -42,7 +42,7 @@ cd PurrfectBytes/PurrfectBytesWeb
 uv sync
 
 # Run the application
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 9000
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 9000
 ```
 
 Visit `http://localhost:9000` to access the web interface.

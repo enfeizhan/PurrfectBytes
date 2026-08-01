@@ -138,7 +138,7 @@ uv run python concatenate.py audio --file texts.txt
 
 ### Development
 ```bash
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 9000
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 9000
 ```
 
 ### Production

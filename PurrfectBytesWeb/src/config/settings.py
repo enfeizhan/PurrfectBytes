@@ -16,7 +16,8 @@ os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # Base directories
 BASE_DIR = Path(__file__).parent.parent.parent
-AUDIO_DIR = BASE_DIR / "audio_files"
+# Generated media lives in /tmp so a system reboot flushes it
+AUDIO_DIR = Path("/tmp/audio_files")
 VIDEO_DIR = Path("/tmp/video_files")
 TEMPLATES_DIR = BASE_DIR / "templates"
 ASSETS_DIR = BASE_DIR / "assets"
@@ -26,8 +27,8 @@ AUDIO_DIR.mkdir(exist_ok=True)
 VIDEO_DIR.mkdir(exist_ok=True)
 ASSETS_DIR.mkdir(exist_ok=True)
 
-# Server settings
-SERVER_HOST = "0.0.0.0"
+# Server settings — localhost only: this is a private desktop application
+SERVER_HOST = os.getenv("SERVER_HOST", "127.0.0.1")
 SERVER_PORT = 9000
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
@@ -131,6 +132,7 @@ SUPPORTED_LANGUAGES: Dict[str, Dict[str, str]] = {
     'da': {'name': 'Danish', 'gtts': 'da'},
     'no': {'name': 'Norwegian', 'gtts': 'no'},
     'fi': {'name': 'Finnish', 'gtts': 'fi'},
+    'vi': {'name': 'Vietnamese', 'gtts': 'vi'},
 }
 
 # CJK character ranges for text wrapping
@@ -141,12 +143,6 @@ CJK_UNICODE_RANGES = [
     (0x30A0, 0x30FF),  # Katakana
     (0xAC00, 0xD7AF),  # Hangul
 ]
-
-# API rate limiting (future feature)
-RATE_LIMIT_CONFIG = {
-    "requests_per_minute": 60,
-    "burst_limit": 10,
-}
 
 # File cleanup settings
 CLEANUP_CONFIG = {
@@ -180,7 +176,6 @@ def get_config() -> Dict[str, Any]:
         "languages": LANGUAGE_CONFIG,
         "supported_languages": SUPPORTED_LANGUAGES,
         "cjk_ranges": CJK_UNICODE_RANGES,
-        "rate_limit": RATE_LIMIT_CONFIG,
         "cleanup": CLEANUP_CONFIG,
         "qr_code": QR_CODE_CONFIG,
     }

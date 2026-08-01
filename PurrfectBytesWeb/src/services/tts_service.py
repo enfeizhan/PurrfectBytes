@@ -5,13 +5,19 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 
 from gtts import gTTS
-import librosa
 from pydub import AudioSegment
 
 from src.config.settings import AUDIO_DIR, AUDIO_CONFIG
-from src.utils.text_utils import clean_text_for_tts
-from src.models.schemas import CharacterTiming, AudioAnalysis
+from src.utils.text_utils import clean_text_for_tts, filename_slug
+from src.models.schemas import AudioAnalysis
+from src.utils.audio_utils import get_audio_duration
 from src.utils.logger import get_logger
+from src.services.audio_timing import (
+    compute_character_timings,
+    load_word_boundaries,
+    LEAD_TIME,
+    OVERLAP_DURATION,
+)
 from src.services.tts_engines import (
     TTSEngine,
     TTSEngineFactory,
@@ -23,12 +29,11 @@ logger = get_logger(__name__)
 
 class TTSService:
     """Service for text-to-speech conversion and audio analysis.
-    
+
     Supports multiple TTS engines:
     - gTTS (Google Text-to-Speech) - Simple, reliable, but monotonic
     - Edge-TTS (Microsoft Edge) - Natural neural voices, best quality
     - Piper - Fast offline neural TTS
-    - Coqui TTS - Advanced open-source neural TTS
     """
     
     def __init__(self, default_engine: TTSEngine = TTSEngine.GTTS):
@@ -103,109 +108,35 @@ class TTSService:
     def analyze_audio_timing(self, text: str, audio_path: Path) -> AudioAnalysis:
         """
         Analyze audio to create character-level timing information.
-        
+
+        Uses real Edge TTS word boundaries when available (sidecar file written
+        during synthesis), otherwise spreads characters uniformly.
+
         Args:
             text: Original text used for TTS
             audio_path: Path to the generated audio file
-            
+
         Returns:
             AudioAnalysis with timing information
         """
         try:
-            # Load audio with librosa for analysis
-            y, sr_rate = librosa.load(str(audio_path))
-            duration = librosa.get_duration(y=y, sr=sr_rate)
-            
-            # Calculate character timings
-            char_timings = self._calculate_character_timings(text, duration)
-            
-            # Calculate additional metrics
-            word_count = len(text.split())
-            words_per_second = word_count / duration if duration > 0 else 0
-            
-            return AudioAnalysis(
-                duration=duration,
-                character_timings=char_timings,
-                words_per_second=words_per_second,
-                lead_time=0.3,  # From config
-                overlap_duration=0.4  # From config
-            )
-            
-        except Exception as e:
-            # Fallback to simple timing calculation
-            return self._create_fallback_timing(text, audio_path)
-    
-    def _get_audio_duration(self, audio_path: Path) -> float:
-        """Get duration of audio file."""
-        try:
-            y, sr = librosa.load(str(audio_path))
-            return librosa.get_duration(y=y, sr=sr)
+            duration = get_audio_duration(audio_path)
         except Exception:
-            # Fallback estimation based on text length
-            return len(audio_path.read_bytes()) / 16000  # Rough estimate
-    
-    def _calculate_character_timings(
-        self, 
-        text: str, 
-        duration: float, 
-        lead_time: float = 0.3, 
-        overlap_duration: float = 0.4
-    ) -> list[CharacterTiming]:
-        """Calculate timing for each character in the text."""
-        chars = list(text.replace(' ', ''))  # Remove spaces for timing calculation
-        char_count = len(chars)
-        
-        if char_count == 0:
-            return []
-        
-        char_timings = []
-        chars_per_second = char_count / duration if duration > 0 else 1
-        
-        current_pos = 0
-        for i, char in enumerate(text):
-            if char == ' ':
-                # Spaces get shorter timing
-                start_time = max(0, (current_pos / chars_per_second) - lead_time)
-                end_time = ((current_pos + 0.5) / chars_per_second) + overlap_duration
-                current_pos += 0.5
-            else:
-                # Regular characters
-                start_time = max(0, (current_pos / chars_per_second) - lead_time)
-                end_time = ((current_pos + 1) / chars_per_second) + overlap_duration
-                current_pos += 1
-            
-            char_timings.append(CharacterTiming(
-                char=char,
-                start_time=start_time,
-                end_time=end_time,
-                position=i
-            ))
-        
-        return char_timings
-    
-    def _create_fallback_timing(self, text: str, audio_path: Path) -> AudioAnalysis:
-        """Create fallback timing when audio analysis fails."""
-        # Estimate duration
-        duration = len(text) * 0.1  # Rough estimate: 10 chars per second
-        
-        # Create simple linear timing
-        char_timings = []
-        char_duration = duration / len(text) if len(text) > 0 else 0.1
-        
-        for i, char in enumerate(text):
-            char_timings.append(CharacterTiming(
-                char=char,
-                start_time=i * char_duration,
-                end_time=(i + 1) * char_duration,
-                position=i
-            ))
-        
+            duration = len(text) * 0.1  # Rough estimate: 10 chars per second
+
+        char_timings = compute_character_timings(
+            text, duration, load_word_boundaries(audio_path)
+        )
+
+        word_count = len(text.split())
+        words_per_second = word_count / duration if duration > 0 else 0
+
         return AudioAnalysis(
             duration=duration,
             character_timings=char_timings,
-            words_per_second=len(text.split()) / duration if duration > 0 else 0,
-            lead_time=0.3,
-            overlap_duration=0.4
+            words_per_second=words_per_second,
+            lead_time=LEAD_TIME,
+            overlap_duration=OVERLAP_DURATION
         )
     
     def cleanup_old_files(self, max_age_hours: int = 24) -> int:
@@ -219,19 +150,20 @@ class TTSService:
             Number of files removed
         """
         import time
-        
+
         removed_count = 0
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
-        
-        for audio_file in self.audio_dir.glob("*.mp3"):
-            if current_time - audio_file.stat().st_mtime > max_age_seconds:
-                try:
-                    audio_file.unlink()
-                    removed_count += 1
-                except OSError:
-                    pass  # File might be in use or already deleted
-        
+
+        for pattern in ("*.mp3", "*.wav", "*.m4a", "*.words.json"):
+            for audio_file in self.audio_dir.glob(pattern):
+                if current_time - audio_file.stat().st_mtime > max_age_seconds:
+                    try:
+                        audio_file.unlink()
+                        removed_count += 1
+                    except OSError:
+                        pass  # File might be in use or already deleted
+
         return removed_count
     
     def concatenate_audio(
@@ -381,7 +313,7 @@ class TTSService:
                 
                 # Generate output filename if not provided
                 if not output_filename:
-                    output_filename = f"repeat_{repetitions}x_{uuid.uuid4()}.{self.audio_config['format']}"
+                    output_filename = f"repeat_{repetitions}x_{filename_slug(text)}_{uuid.uuid4().hex[:8]}.{self.audio_config['format']}"
                 output_path = self.audio_dir / output_filename
                 
                 # Concatenate by repeating the same audio
@@ -409,7 +341,7 @@ class TTSService:
                 
                 # Generate output filename if not provided
                 if not output_filename:
-                    output_filename = f"repeat_{repetitions}x_{uuid.uuid4()}.{self.audio_config['format']}"
+                    output_filename = f"repeat_{repetitions}x_{filename_slug(text)}_{uuid.uuid4().hex[:8]}.{self.audio_config['format']}"
                 output_path = self.audio_dir / output_filename
                 
                 # Generate the repeated audio directly

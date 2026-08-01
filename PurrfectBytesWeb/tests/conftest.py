@@ -67,7 +67,11 @@ def language_service():
 @pytest.fixture
 def tts_service(audio_dir, monkeypatch):
     """Create TTS service with mocked directory."""
+    from src.services.tts_engines import TTSEngineFactory
+
     monkeypatch.setattr("src.services.tts_service.AUDIO_DIR", audio_dir)
+    # Engines are cached per-process; reset so each test gets the temp dir
+    TTSEngineFactory._instances.clear()
     return TTSService()
 
 
@@ -83,20 +87,17 @@ def video_service(video_dir, monkeypatch):
 
 @pytest.fixture
 def mock_gtts(mocker):
-    """Mock gTTS to avoid network calls."""
+    """Mock gTTS to avoid network calls (engines import it lazily from gtts)."""
     mock_tts = mocker.MagicMock()
-    mock_tts_class = mocker.patch('src.services.tts_service.gTTS')
-    mock_tts_class.return_value = mock_tts
+    mocker.patch('gtts.gTTS', return_value=mock_tts)
     return mock_tts
 
 
 @pytest.fixture
-def mock_librosa(mocker):
-    """Mock librosa to avoid audio processing."""
-    mock_librosa = mocker.patch('src.services.tts_service.librosa')
-    mock_librosa.load.return_value = ([1, 2, 3], 22050)  # Mock audio data
-    mock_librosa.get_duration.return_value = 3.5  # Mock duration
-    return mock_librosa
+def mock_audio_duration(mocker):
+    """Mock audio duration reading to avoid decoding real audio."""
+    mocker.patch('src.services.tts_engines.get_audio_duration', return_value=3.5)
+    return mocker.patch('src.services.tts_service.get_audio_duration', return_value=3.5)
 
 
 @pytest.fixture
@@ -124,10 +125,10 @@ def client():
 
 
 @pytest.fixture
-def mock_all_external_deps(mock_gtts, mock_librosa, mock_moviepy):
+def mock_all_external_deps(mock_gtts, mock_audio_duration, mock_moviepy):
     """Mock all external dependencies for integration tests."""
     return {
         'gtts': mock_gtts,
-        'librosa': mock_librosa,
+        'audio_duration': mock_audio_duration,
         'moviepy': mock_moviepy
     }

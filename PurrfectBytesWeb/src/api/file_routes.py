@@ -1,6 +1,6 @@
 """File management API routes — download, delete, and cleanup endpoints."""
 
-import time
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -17,27 +17,42 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _validate_filename(filename: str) -> str:
+    """Reject path traversal — filenames must be plain names, no directories."""
+    if not filename or filename != Path(filename).name or filename in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return filename
+
+
+@router.get("/files")
+def list_files(limit: int = 20):
+    """List recently generated audio and video files, newest first."""
+    def collect(directory: Path, patterns: tuple, url_prefix: str, kind: str) -> list:
+        files = []
+        for pattern in patterns:
+            files.extend(directory.glob(pattern))
+        return [
+            {
+                "filename": f.name,
+                "kind": kind,
+                "size": f.stat().st_size,
+                "modified": f.stat().st_mtime,
+                "url": f"{url_prefix}/{f.name}",
+            }
+            for f in files
+        ]
+
+    entries = collect(AUDIO_DIR, ("*.mp3", "*.wav", "*.m4a"), "/download", "audio")
+    entries += collect(VIDEO_DIR, ("*.mp4",), "/download-video", "video")
+    entries.sort(key=lambda e: e["modified"], reverse=True)
+
+    return {"success": True, "files": entries[:max(1, min(limit, 100))]}
+
+
 @router.get("/download/{filename}")
 async def download_audio(filename: str):
     """Download audio file."""
-    file_path = AUDIO_DIR / filename
-
-    if not file_path.exists():
-        logger.warning(f"Audio file not found: {filename}")
-        raise HTTPException(status_code=404, detail="Audio file not found")
-
-    logger.info(f"Serving audio file: {filename}")
-    return FileResponse(
-        path=file_path,
-        media_type="audio/mpeg",
-        filename=filename
-    )
-
-
-@router.get("/download/audio/{filename}")
-async def download_audio_new(filename: str):
-    """Download audio file (new route)."""
-    file_path = AUDIO_DIR / filename
+    file_path = AUDIO_DIR / _validate_filename(filename)
 
     if not file_path.exists():
         logger.warning(f"Audio file not found: {filename}")
@@ -53,34 +68,18 @@ async def download_audio_new(filename: str):
 
 @router.get("/download-video/{filename}")
 async def download_video(filename: str):
-    """Download video file."""
-    file_path = VIDEO_DIR / filename
+    """Download video file (also serves preview PNGs)."""
+    file_path = VIDEO_DIR / _validate_filename(filename)
 
     if not file_path.exists():
         logger.warning(f"Video file not found: {filename}")
         raise HTTPException(status_code=404, detail="Video file not found")
 
+    media_type = "image/png" if filename.endswith(".png") else "video/mp4"
     logger.info(f"Serving video file: {filename}")
     return FileResponse(
         path=file_path,
-        media_type="video/mp4",
-        filename=filename
-    )
-
-
-@router.get("/download/video/{filename}")
-async def download_video_new(filename: str):
-    """Download video file (new route)."""
-    file_path = VIDEO_DIR / filename
-
-    if not file_path.exists():
-        logger.warning(f"Video file not found: {filename}")
-        raise HTTPException(status_code=404, detail="Video file not found")
-
-    logger.info(f"Serving video file: {filename}")
-    return FileResponse(
-        path=file_path,
-        media_type="video/mp4",
+        media_type=media_type,
         filename=filename
     )
 
@@ -101,7 +100,7 @@ async def favicon():
 @router.delete("/audio/{filename}")
 async def delete_audio(filename: str):
     """Delete audio file."""
-    file_path = AUDIO_DIR / filename
+    file_path = AUDIO_DIR / _validate_filename(filename)
 
     try:
         if file_path.exists():
@@ -120,7 +119,7 @@ async def delete_audio(filename: str):
 @router.delete("/video/{filename}")
 async def delete_video(filename: str):
     """Delete video file."""
-    file_path = VIDEO_DIR / filename
+    file_path = VIDEO_DIR / _validate_filename(filename)
 
     try:
         if file_path.exists():
@@ -137,7 +136,7 @@ async def delete_video(filename: str):
 
 
 @router.post("/cleanup")
-async def cleanup_old_files(max_age_hours: int = 24):
+def cleanup_old_files(max_age_hours: int = 24):
     """Clean up old generated files."""
     with RequestLogger(logger, "file cleanup"):
         try:

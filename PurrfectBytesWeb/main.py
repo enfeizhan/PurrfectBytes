@@ -71,10 +71,7 @@ def create_app() -> FastAPI:
     )
     
     # Include API routes
-    app.include_router(router, prefix="/api/v1", tags=["api"])
-    
-    # Also include routes at root level for backward compatibility
-    app.include_router(router)
+    app.include_router(router, tags=["api"])
     
     # Mount static files (CSS, JS)
     from pathlib import Path
@@ -84,16 +81,20 @@ def create_app() -> FastAPI:
     
     # Setup templates
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-    
+
+    def _asset_version() -> int:
+        """Newest mtime of the static assets — busts browser cache on changes."""
+        try:
+            return int(max(p.stat().st_mtime for p in static_dir.rglob("*") if p.is_file()))
+        except (ValueError, OSError):
+            return 0
+
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         """Serve the main application page."""
-        return templates.TemplateResponse("index.html", {"request": request})
-    
-    @app.get("/docs-redirect")
-    async def docs_redirect():
-        """Redirect to API documentation."""
-        return {"message": "API documentation available at /docs"}
+        return templates.TemplateResponse(
+            request, "index.html", {"asset_version": _asset_version()}
+        )
     
     # Add middleware for request logging
     @app.middleware("http")

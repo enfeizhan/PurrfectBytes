@@ -1,5 +1,6 @@
 """Video generation service with character-level highlighting."""
 
+import os
 import uuid
 from pathlib import Path
 from typing import Set, List, Tuple, Optional
@@ -13,6 +14,7 @@ from PIL import Image, ImageDraw
 
 from src.config.settings import VIDEO_DIR, VIDEO_CONFIG
 from src.models.schemas import AudioAnalysis, VideoConfig, CharacterTiming
+from src.utils.ffmpeg_utils import concat_copy, repeat_copy
 from src.utils.text_utils import wrap_text_for_video
 from src.utils.font_utils import load_font
 from src.utils.logger import get_logger
@@ -46,8 +48,10 @@ class VideoService:
         Raises:
             Exception: If video generation fails
         """
-        # Generate unique filename
-        video_filename = f"{uuid.uuid4()}.mp4"
+        # Generate unique, human-readable filename
+        from src.utils.text_utils import filename_slug
+
+        video_filename = f"{filename_slug(text)}_{uuid.uuid4().hex[:8]}.mp4"
         video_path = self.video_dir / video_filename
         
         try:
@@ -85,6 +89,8 @@ class VideoService:
                 fps=self.config.fps,
                 codec='libx264',
                 audio_codec='aac',
+                preset='veryfast',
+                threads=os.cpu_count(),
                 temp_audiofile='temp-audio.m4a',
                 remove_temp=True,
                 logger=None  # Suppress output
@@ -211,14 +217,15 @@ class VideoService:
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
         
-        for video_file in self.video_dir.glob("*.mp4"):
-            if current_time - video_file.stat().st_mtime > max_age_seconds:
-                try:
-                    video_file.unlink()
-                    removed_count += 1
-                except OSError:
-                    pass  # File might be in use or already deleted
-        
+        for pattern in ("*.mp4", "*.png"):
+            for video_file in self.video_dir.glob(pattern):
+                if current_time - video_file.stat().st_mtime > max_age_seconds:
+                    try:
+                        video_file.unlink()
+                        removed_count += 1
+                    except OSError:
+                        pass  # File might be in use or already deleted
+
         return removed_count
     
     def get_video_info(self, video_path: Path) -> dict:
@@ -283,34 +290,43 @@ class VideoService:
             output_filename = f"concat_{uuid.uuid4()}.mp4"
         output_path = self.video_dir / output_filename
         
+        # All videos come from the same encoding path, so ffmpeg can
+        # concatenate them by stream copy — no re-encoding.
+        try:
+            return concat_copy(video_paths, output_path)
+        except Exception as e:
+            logger.warning(f"Stream-copy concat failed, re-encoding with MoviePy: {e}")
+
         try:
             # Load video clips
             clips = []
             for video_path in video_paths:
                 clip = VideoFileClip(str(video_path))
                 clips.append(clip)
-            
+
             # Concatenate videos
             final_clip = concatenate_videoclips(clips, method=method)
-            
+
             # Write the concatenated video
             final_clip.write_videofile(
                 str(output_path),
                 fps=self.config.fps,
                 codec='libx264',
                 audio_codec='aac',
+                preset='veryfast',
+                threads=os.cpu_count(),
                 temp_audiofile='temp-audio.m4a',
                 remove_temp=True,
                 logger=None  # Suppress output
             )
-            
+
             # Clean up clips
             for clip in clips:
                 clip.close()
             final_clip.close()
-            
+
             return output_path
-            
+
         except Exception as e:
             # Clean up if file was partially created
             if output_path.exists():
@@ -409,40 +425,17 @@ class VideoService:
                     return output_path
                 return single_video_path
             
-            # For multiple repetitions, try moviepy concatenation first
+            # For multiple repetitions, repeat via ffmpeg stream copy (no re-encode)
             try:
-                # Load the single video clip
-                single_clip = VideoFileClip(str(single_video_path))
-                
-                # Create list of the same clip repeated
-                clips = [single_clip] * repetitions
-                
-                # Concatenate the clips
-                final_clip = concatenate_videoclips(clips, method="compose")
-                
-                # Generate output filename
                 if not output_filename:
                     output_filename = f"repeat_{repetitions}x_{uuid.uuid4()}.mp4"
                 output_path = self.video_dir / output_filename
-                
-                # Write the concatenated video
-                final_clip.write_videofile(
-                    str(output_path),
-                    fps=self.config.fps,
-                    codec='libx264',
-                    audio_codec='aac',
-                    temp_audiofile='temp-audio.m4a',
-                    remove_temp=True,
-                    logger=None
-                )
-                
-                # Clean up
-                single_clip.close()
-                final_clip.close()
+
+                repeat_copy(single_video_path, repetitions, output_path)
                 single_video_path.unlink()  # Remove single video
-                
+
                 return output_path
-                
+
             except Exception as e:
                 # Fallback: Use the single video and duplicate audio externally
                 # This isn't perfect but better than broken highlighting

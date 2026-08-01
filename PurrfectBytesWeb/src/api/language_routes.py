@@ -38,7 +38,7 @@ async def get_tts_engines():
 
 
 @router.get("/tts-voices/{engine}")
-async def get_tts_voices(engine: str, language: str = "en"):
+def get_tts_voices(engine: str, language: str = "en"):
     """Get available voices for a TTS engine."""
     try:
         engine_enum = TTSService.parse_engine(engine)

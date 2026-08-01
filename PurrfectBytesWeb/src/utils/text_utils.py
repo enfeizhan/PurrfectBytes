@@ -143,6 +143,19 @@ def estimate_reading_time(text: str, words_per_minute: int = 200) -> float:
     word_count = len(text.split())
     return (word_count / words_per_minute) * 60
 
+def filename_slug(text: str, max_length: int = 40) -> str:
+    """Turn text into a short, filesystem-safe slug for readable filenames.
+
+    Keeps unicode letters/digits (CJK included), replaces whitespace with
+    hyphens, drops everything else.
+    """
+    import re
+
+    slug = re.sub(r"[^\w\s-]", "", text or "").strip()
+    slug = re.sub(r"\s+", "-", slug)
+    return slug[:max_length].rstrip("-_") or "tts"
+
+
 def truncate_text(text: str, max_length: int = 1000) -> str:
     """Truncate text to maximum length while preserving word boundaries."""
     if len(text) <= max_length:

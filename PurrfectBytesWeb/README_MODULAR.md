@@ -123,7 +123,7 @@ uv sync
 uv run python main.py
 
 # Or use uvicorn directly
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --reload --host 127.0.0.1 --port 9000
 ```
 
 ### Production
@@ -174,10 +174,10 @@ uv run gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
 uv run pytest
 
 # API testing with curl
-curl -X POST "http://localhost:8000/detect-language" \
+curl -X POST "http://localhost:9000/detect-language" \
   -F "text=Hello world"
 
-curl -X POST "http://localhost:8000/convert-to-video" \
+curl -X POST "http://localhost:9000/convert-to-video" \
   -F "text=Hello world" -F "language=en"
 ```
 

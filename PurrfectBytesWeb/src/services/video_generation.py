@@ -14,14 +14,15 @@ of the modular architecture.
 import os
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from moviepy.video.VideoClip import VideoClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 from PIL import Image, ImageDraw, ImageFont
-import librosa
 
 from src.config.settings import ASSETS_DIR, QR_CODE_CONFIG
+from src.services.audio_timing import compute_character_timings, load_word_boundaries
+from src.utils.audio_utils import get_audio_duration
 from src.utils.text_utils import wrap_text_for_video, is_cjk_character
 from src.utils.font_utils import find_best_font_for_text, load_font as _load_font_basic
 from src.utils.logger import get_logger
@@ -175,68 +176,64 @@ def load_font(font_size: int = 48, text: str = None) -> ImageFont.ImageFont:
         return _load_font_for_text("ABCabc123", font_size)
 
 
-def analyze_audio_timing(text: str, audio_path) -> list:
-    """Analyze audio to create character-level timing with lead compensation."""
-    try:
-        y, sr_rate = librosa.load(str(audio_path))
-        duration = librosa.get_duration(y=y, sr=sr_rate)
-
-        chars = list(text.replace(' ', ''))
-        char_count = len(chars)
-
-        if char_count == 0:
-            return []
-
-        lead_time = 0.3
-        overlap_duration = 0.4
-
-        char_timings = []
-        chars_per_second = char_count / duration
-
-        current_pos = 0
-        for i, char in enumerate(text):
-            if char == ' ':
-                start_time = max(0, (current_pos / chars_per_second) - lead_time) if chars_per_second > 0 else max(0, i * 0.1 - lead_time)
-                end_time = ((current_pos + 0.5) / chars_per_second) + overlap_duration if chars_per_second > 0 else (i + 1) * 0.1
-                char_timings.append({
-                    'char': char,
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'position': i
-                })
-                current_pos += 0.5
-            else:
-                start_time = max(0, (current_pos / chars_per_second) - lead_time) if chars_per_second > 0 else max(0, i * 0.1 - lead_time)
-                end_time = ((current_pos + 1) / chars_per_second) + overlap_duration if chars_per_second > 0 else (i + 1) * 0.1
-                char_timings.append({
-                    'char': char,
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'position': i
-                })
-                current_pos += 1
-
-        logger.debug(f"Audio duration: {duration:.2f}s, Characters: {len(text)}")
-        return char_timings
-
-    except Exception as e:
-        logger.warning(f"Error analyzing audio: {e}, using fallback timing")
-        char_timings = []
+def analyze_audio_timing(text: str, audio_path, duration: Optional[float] = None) -> list:
+    """Create character-level timing for the audio (word boundaries when available)."""
+    if duration is None:
         try:
-            y, sr_rate = librosa.load(str(audio_path))
-            duration = librosa.get_duration(y=y, sr=sr_rate)
-        except Exception:
+            duration = get_audio_duration(Path(audio_path))
+        except Exception as e:
+            logger.warning(f"Error reading audio duration: {e}, estimating from text length")
             duration = len(text) * 0.1
-        char_duration = duration / len(text) if len(text) > 0 else 0.1
-        lead_time = 0.3
-        for i, char in enumerate(text):
-            char_timings.append({
+
+    timings = compute_character_timings(text, duration, load_word_boundaries(audio_path))
+    logger.debug(f"Audio duration: {duration:.2f}s, Characters: {len(text)}")
+    return [
+        {
+            'char': t.char,
+            'start_time': t.start_time,
+            'end_time': t.end_time,
+            'position': t.position,
+        }
+        for t in timings
+    ]
+
+
+def _compute_char_layout(
+    lines: List[str],
+    font: ImageFont.ImageFont,
+    draw: ImageDraw.ImageDraw,
+    video_width: int,
+    video_height: int,
+    line_height: int = 70,
+) -> List[dict]:
+    """Precompute position and bounding box for every character.
+
+    Glyph metrics don't change between frames, so this runs once per video
+    instead of once per character per frame.
+    """
+    layout = []
+    y_position = (video_height - len(lines) * line_height) // 2
+
+    for line in lines:
+        widths = []
+        for char in line:
+            bbox = draw.textbbox((0, 0), char, font=font)
+            widths.append(bbox[2] - bbox[0])
+
+        x_position = (video_width - sum(widths)) // 2
+        for char, width in zip(line, widths):
+            bbox = draw.textbbox((x_position, y_position), char, font=font)
+            layout.append({
                 'char': char,
-                'start_time': max(0, i * char_duration - lead_time),
-                'end_time': (i + 1) * char_duration,
-                'position': i
+                'x': x_position,
+                'y': y_position,
+                'bbox': bbox,
             })
-        return char_timings
+            x_position += width
+
+        y_position += line_height
+
+    return layout
 
 
 def _load_assets(show_qr_code: bool = False):
@@ -290,7 +287,7 @@ def create_character_animated_video(
     audio = AudioFileClip(str(audio_path))
     duration = audio.duration
 
-    char_timings = analyze_audio_timing(text, audio_path)
+    char_timings = analyze_audio_timing(text, audio_path, duration=duration)
 
     video_width = 1280
     video_height = 720
@@ -305,55 +302,52 @@ def create_character_animated_video(
     dummy_draw = ImageDraw.Draw(dummy_img)
     lines = wrap_text_for_video(text, video_width, font, dummy_draw)
 
+    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height)
+
+    # Static base frame: background, all characters in inactive color, QR code.
+    # Per frame we only overlay the currently highlighted characters — the
+    # highlight rectangle fully covers the inactive glyph underneath.
+    if background_img is not None:
+        base_img = background_img.copy()
+    else:
+        base_img = Image.new('RGB', (video_width, video_height), color=bg_color)
+    base_draw = ImageDraw.Draw(base_img)
+    for entry in char_layout:
+        base_draw.text((entry['x'], entry['y']), entry['char'], font=font, fill=(80, 50, 30))
+
+    if qr_code_img is not None:
+        qr_x = qr_margin
+        qr_y = video_height - qr_size - qr_margin
+        qr_with_opacity = qr_code_img.copy()
+        alpha = qr_with_opacity.split()[3]
+        alpha = alpha.point(lambda p: int(p * qr_opacity))
+        qr_with_opacity.putalpha(alpha)
+        base_img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
+
     def make_frame(t):
-        if background_img is not None:
-            img = background_img.copy()
-        else:
-            img = Image.new('RGB', (video_width, video_height), color=bg_color)
+        img = base_img.copy()
         draw = ImageDraw.Draw(img)
 
-        active_chars = set()
-        for timing in char_timings:
-            if timing['start_time'] <= t <= timing['end_time']:
-                active_chars.add(timing['position'])
-
-        y_position = (video_height - len(lines) * 70) // 2
-        char_position = 0
         cat_x = None
         cat_y = None
 
-        for line in lines:
-            line_width = 0
-            for char in line:
-                bbox = draw.textbbox((0, 0), char, font=font)
-                line_width += bbox[2] - bbox[0]
+        for timing in char_timings:
+            if not (timing['start_time'] <= t <= timing['end_time']):
+                continue
+            position = timing['position']
+            if position >= len(char_layout):
+                continue
+            entry = char_layout[position]
+            bbox = entry['bbox']
 
-            x_position = (video_width - line_width) // 2
+            draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
+                           fill=(220, 50, 50))
+            if entry['char'] != ' ':
+                draw.text((entry['x'], entry['y']), entry['char'], font=font, fill=(255, 255, 255))
 
-            for char in line:
-                is_active = char_position in active_chars
-
-                if is_active:
-                    color = (255, 255, 255)
-                    bbox = draw.textbbox((x_position, y_position), char, font=font)
-                    draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
-                                 fill=(220, 50, 50))
-                    if cat_x is None:
-                        char_width = bbox[2] - bbox[0]
-                        cat_x = x_position + char_width // 2
-                        cat_y = y_position
-                else:
-                    color = (80, 50, 30)
-
-                if char != ' ' or not is_active:
-                    draw.text((x_position, y_position), char, font=font, fill=color)
-
-                bbox = draw.textbbox((0, 0), char, font=font)
-                char_width = bbox[2] - bbox[0]
-                x_position += char_width
-                char_position += 1
-
-            y_position += 70
+            if cat_x is None:
+                cat_x = entry['x'] + (bbox[2] - bbox[0]) // 2
+                cat_y = entry['y']
 
         if cat_logo is not None and cat_x is not None and cat_y is not None:
             cat_offset_y = cat_size + 10
@@ -362,15 +356,6 @@ def create_character_animated_video(
             cat_paste_x = max(0, min(cat_paste_x, video_width - cat_size))
             cat_paste_y = max(0, min(cat_paste_y, video_height - cat_size))
             img.paste(cat_logo, (cat_paste_x, cat_paste_y), cat_logo)
-
-        if qr_code_img is not None:
-            qr_x = qr_margin
-            qr_y = video_height - qr_size - qr_margin
-            qr_with_opacity = qr_code_img.copy()
-            alpha = qr_with_opacity.split()[3]
-            alpha = alpha.point(lambda p: int(p * qr_opacity))
-            qr_with_opacity.putalpha(alpha)
-            img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
 
         return np.array(img)
 
@@ -382,6 +367,8 @@ def create_character_animated_video(
         fps=fps,
         codec='libx264',
         audio_codec='aac',
+        preset='veryfast',
+        threads=os.cpu_count(),
         temp_audiofile='temp-audio.m4a',
         remove_temp=True,
         logger=None
@@ -431,43 +418,27 @@ def create_preview_frame(
     dummy_draw = ImageDraw.Draw(dummy_img)
     lines = wrap_text_for_video(text, video_width, font, dummy_draw)
 
-    y_position = (video_height - len(lines) * 70) // 2
-    char_position = 0
+    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height)
+
     cat_x = None
     cat_y = None
 
-    for line in lines:
-        line_width = 0
-        for char in line:
-            bbox = draw.textbbox((0, 0), char, font=font)
-            line_width += bbox[2] - bbox[0]
+    for char_position, entry in enumerate(char_layout):
+        is_active = char_position == highlight_position
+        bbox = entry['bbox']
 
-        x_position = (video_width - line_width) // 2
+        if is_active:
+            color = (255, 255, 255)
+            draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
+                         fill=(220, 50, 50))
+            if cat_x is None:
+                cat_x = entry['x'] + (bbox[2] - bbox[0]) // 2
+                cat_y = entry['y']
+        else:
+            color = (80, 50, 30)
 
-        for char in line:
-            is_active = char_position == highlight_position
-
-            if is_active:
-                color = (255, 255, 255)
-                bbox = draw.textbbox((x_position, y_position), char, font=font)
-                draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
-                             fill=(220, 50, 50))
-                if cat_x is None:
-                    char_width = bbox[2] - bbox[0]
-                    cat_x = x_position + char_width // 2
-                    cat_y = y_position
-            else:
-                color = (80, 50, 30)
-
-            if char != ' ' or not is_active:
-                draw.text((x_position, y_position), char, font=font, fill=color)
-
-            bbox = draw.textbbox((0, 0), char, font=font)
-            char_width = bbox[2] - bbox[0]
-            x_position += char_width
-            char_position += 1
-
-        y_position += 70
+        if entry['char'] != ' ' or not is_active:
+            draw.text((entry['x'], entry['y']), entry['char'], font=font, fill=color)
 
     if cat_logo is not None and cat_x is not None and cat_y is not None:
         cat_offset_y = cat_size + 10
