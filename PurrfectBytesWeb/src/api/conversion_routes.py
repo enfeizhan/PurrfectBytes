@@ -69,7 +69,7 @@ def convert_to_video(
     language: str = Form("en"),
     slow: bool = Form(False),
     font_size: int = Form(48),
-    repetitions: int = Form(1),
+    repetitions: int = Form(10),
     show_qr_code: bool = Form(False),
     engine: str = Form("edge"),
     voice: Optional[str] = Form(None)

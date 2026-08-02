@@ -252,7 +252,7 @@ async function handleConversion(endpoint, isVideo = false) {
     }, 1000);
 
     const formData = new FormData();
-    const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
+    const repetitions = parseInt(document.getElementById('repetitions').value) || 10;
     const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
 
     formData.append('text', textArea.value);
@@ -351,7 +351,7 @@ async function handleConversion(endpoint, isVideo = false) {
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
     // Repetitions on audio are handled by the /repeat-audio endpoint
-    const repetitions = parseInt(document.getElementById('repetitions').value) || 1;
+    const repetitions = parseInt(document.getElementById('repetitions').value) || 10;
     handleConversion(repetitions > 1 ? '/repeat-audio' : '/convert', false);
 });
 
