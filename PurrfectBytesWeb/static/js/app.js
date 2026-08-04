@@ -742,6 +742,7 @@ uploadYoutubeBtn.addEventListener('click', async () => {
             lastUploadedFilename = lastGeneratedVideoFilename;
             uploadResult.innerHTML = `
                 ✅ <strong>Uploaded successfully!</strong><br>
+                🎬 <code>${lastUploadedFilename}</code><br>
                 <a href="${data.video_url}" target="_blank" style="color: #667eea;">
                     🔗 ${data.video_url}
                 </a>
