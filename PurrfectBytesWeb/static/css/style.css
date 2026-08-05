@@ -487,3 +487,50 @@ button.loading .spinner {
 .toast.error {
     background: #c0392b;
 }
+/* ========== Speed sequence builder ========== */
+
+.sequence-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.sequence-row .seq-count {
+    width: 90px;
+    flex: none;
+}
+
+.sequence-row .seq-speed {
+    flex: 1;
+}
+
+.sequence-row .seq-remove {
+    width: 36px;
+    flex: none;
+    padding: 8px 0;
+    background: #e74c3c;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.sequence-row .seq-remove:hover {
+    box-shadow: 0 4px 10px rgba(231, 76, 60, 0.4);
+}
+
+.add-step-btn {
+    width: auto;
+    padding: 8px 12px;
+    background: #28a745;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.add-step-btn:hover {
+    box-shadow: 0 4px 10px rgba(40, 167, 69, 0.4);
+}
+
+.is-overridden {
+    opacity: 0.5;
+}

@@ -233,9 +233,101 @@ autoDetectBtn.addEventListener('click', function () {
     });
 });
 
+// ========== Speed sequence builder ==========
+
+const sequenceToggle = document.getElementById('sequenceToggle');
+const sequenceBuilder = document.getElementById('sequenceBuilder');
+const sequenceRows = document.getElementById('sequenceRows');
+
+function addSequenceRow(count = 1, speed = 'n') {
+    const row = document.createElement('div');
+    row.className = 'sequence-row';
+
+    const countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.className = 'seq-count';
+    countInput.min = 1;
+    countInput.max = 100;
+    countInput.value = count;
+
+    const speedSelect = document.createElement('select');
+    speedSelect.className = 'seq-speed';
+    speedSelect.innerHTML = `
+        <option value="n">Normal speed</option>
+        <option value="s">Slow speed</option>
+    `;
+    speedSelect.value = speed;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'seq-remove';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Remove step';
+
+    row.append(countInput, speedSelect, removeBtn);
+    sequenceRows.appendChild(row);
+}
+
+sequenceRows.addEventListener('click', (e) => {
+    if (e.target.classList.contains('seq-remove')) {
+        e.target.closest('.sequence-row').remove();
+    }
+});
+
+document.getElementById('addStepBtn').addEventListener('click', () => addSequenceRow());
+
+sequenceToggle.addEventListener('change', () => {
+    const on = sequenceToggle.checked;
+    sequenceBuilder.style.display = on ? 'block' : 'none';
+
+    const repetitionsInput = document.getElementById('repetitions');
+    const slowCheckbox = document.getElementById('slow');
+    repetitionsInput.disabled = on;
+    slowCheckbox.disabled = on;
+    repetitionsInput.closest('.form-group').classList.toggle('is-overridden', on);
+    slowCheckbox.closest('.checkbox-group').classList.toggle('is-overridden', on);
+
+    if (on && !sequenceRows.children.length) {
+        addSequenceRow(3, 'n');
+        addSequenceRow(4, 's');
+        addSequenceRow(3, 'n');
+    }
+});
+
+// Returns "2n,3s" or null (with a toast) when the rows are invalid
+function serializeSequence() {
+    const rows = [...sequenceRows.querySelectorAll('.sequence-row')];
+    if (!rows.length) {
+        showToast('Add at least one sequence step');
+        return null;
+    }
+
+    const parts = [];
+    let total = 0;
+    for (const row of rows) {
+        const count = parseInt(row.querySelector('.seq-count').value);
+        if (!(count >= 1 && count <= 100)) {
+            showToast('Each step count must be between 1 and 100');
+            return null;
+        }
+        total += count;
+        parts.push(`${count}${row.querySelector('.seq-speed').value}`);
+    }
+    if (total > 100) {
+        showToast(`Sequence totals ${total} repetitions (max 100)`);
+        return null;
+    }
+    return parts.join(',');
+}
+
 // ========== Conversion ==========
 
 async function handleConversion(endpoint, isVideo = false) {
+    const sequence = sequenceToggle.checked ? serializeSequence() : null;
+    if (sequenceToggle.checked && !sequence) {
+        return;   // invalid rows — toast already shown
+    }
+
     const button = isVideo ? videoBtn : audioBtn;
     button.classList.add('loading');
     button.disabled = true;
@@ -257,8 +349,12 @@ async function handleConversion(endpoint, isVideo = false) {
 
     formData.append('text', textArea.value);
     formData.append('language', languageSelect.value);
-    formData.append('slow', document.getElementById('slow').checked ? 'true' : 'false');
-    formData.append('repetitions', repetitions);
+    if (sequence) {
+        formData.append('sequence', sequence);
+    } else {
+        formData.append('slow', document.getElementById('slow').checked ? 'true' : 'false');
+        formData.append('repetitions', repetitions);
+    }
     formData.append('engine', ttsEngineSelect.value);
     if (voiceSelect.value) {
         formData.append('voice', voiceSelect.value);
@@ -279,7 +375,7 @@ async function handleConversion(endpoint, isVideo = false) {
 
         if (data.success) {
             resultDiv.className = 'result success show';
-            const isRepeat = repetitions > 1;
+            const repeatLabel = sequence ? `(sequence ${sequence})` : (repetitions > 1 ? `(${repetitions} repetitions)` : '');
 
             if (isVideo) {
                 const videoUrl = data.video_url || data.download_url;
@@ -292,7 +388,7 @@ async function handleConversion(endpoint, isVideo = false) {
                 }
 
                 resultDiv.innerHTML = `
-                    <h3>🎬 Video Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
+                    <h3>🎬 Video Generated Successfully! ${repeatLabel}</h3>
                     ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
                     ${data.duration ? `<p style="color: #666; margin: 5px 0;">Total duration: ${data.duration.toFixed(2)} seconds</p>` : ''}
                     <video controls style="width: 100%; margin-top: 15px;">
@@ -312,7 +408,7 @@ async function handleConversion(endpoint, isVideo = false) {
                 const audioUrl = data.audio_url || data.download_url;
 
                 resultDiv.innerHTML = `
-                    <h3>✅ Audio Generated Successfully! ${isRepeat ? `(${repetitions} repetitions)` : ''}</h3>
+                    <h3>✅ Audio Generated Successfully! ${repeatLabel}</h3>
                     ${data.message ? `<p style="color: #666; margin: 5px 0;">${data.message}</p>` : ''}
                     ${data.duration ? `<p style="color: #666; margin: 5px 0;">Total duration: ${data.duration.toFixed(2)} seconds</p>` : ''}
                     <audio controls>
@@ -350,9 +446,10 @@ async function handleConversion(endpoint, isVideo = false) {
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    // Repetitions on audio are handled by the /repeat-audio endpoint
+    // Repetitions and sequences on audio are handled by /repeat-audio
     const repetitions = parseInt(document.getElementById('repetitions').value) || 10;
-    handleConversion(repetitions > 1 ? '/repeat-audio' : '/convert', false);
+    const useRepeatEndpoint = sequenceToggle.checked || repetitions > 1;
+    handleConversion(useRepeatEndpoint ? '/repeat-audio' : '/convert', false);
 });
 
 videoBtn.addEventListener('click', async (e) => {
@@ -446,6 +543,13 @@ function displayName(filename) {
     if (repMatch) {
         repeat = `${repMatch[1]}× `;
         name = name.slice(repMatch[0].length);
+    }
+
+    // "seq_2n-3s_..." → "[2n,3s] ..."
+    const seqMatch = name.match(/^seq_(\d+[ns](?:-\d+[ns])*)_/);
+    if (seqMatch) {
+        repeat = `[${seqMatch[1].replace(/-/g, ',')}] `;
+        name = name.slice(seqMatch[0].length);
     }
 
     name = name.replace(/^(edge|gtts|piper|concat)_/, '');

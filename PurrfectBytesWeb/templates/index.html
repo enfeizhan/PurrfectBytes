@@ -51,6 +51,21 @@
             </div>
 
             <div class="checkbox-group">
+                <input type="checkbox" id="sequenceToggle">
+                <label for="sequenceToggle">Custom speed sequence</label>
+            </div>
+
+            <div id="sequenceBuilder" class="form-group" style="display: none;">
+                <label>Repetition steps (played in order):</label>
+                <div id="sequenceRows"></div>
+                <button type="button" id="addStepBtn" class="add-step-btn">+ Add step</button>
+                <small class="hint">
+                    e.g. 3 normal then 4 slow. Max 100 total repetitions.
+                    Overrides "Number of Repetitions" and "Slow speech speed" while enabled.
+                </small>
+            </div>
+
+            <div class="checkbox-group">
                 <input type="checkbox" id="slow" name="slow">
                 <label for="slow">Slow speech speed</label>
             </div>

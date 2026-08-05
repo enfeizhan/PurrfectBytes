@@ -11,6 +11,7 @@ from src.services.tts_service import TTSService
 from src.services.video_service import VideoService
 from src.config.settings import VIDEO_DIR
 from src.utils.logger import get_logger, RequestLogger, log_error
+from src.utils.sequence_utils import parse_sequence, describe_sequence, total_repetitions
 
 language_service = LanguageDetectionService()
 tts_service = TTSService()
@@ -42,14 +43,26 @@ def repeat_audio_endpoint(
     language: str = Form("en"),
     slow: bool = Form(False),
     engine: str = Form("edge"),
-    voice: Optional[str] = Form(None)
+    voice: Optional[str] = Form(None),
+    sequence: Optional[str] = Form(None)
 ):
-    """Generate audio once and repeat it multiple times using the specified TTS engine."""
+    """Generate audio once per speed and repeat it following the requested pattern.
+
+    When `sequence` is provided (e.g. "2n,3s" = 2 normal then 3 slow), it takes
+    precedence over `repetitions` and `slow`.
+    """
     with RequestLogger(logger, f"audio repetition (engine={engine})"):
         try:
             if not text:
                 raise HTTPException(status_code=400, detail="No text provided")
-            if repetitions < 1 or repetitions > 100:
+
+            steps = None
+            if sequence:
+                try:
+                    steps = parse_sequence(sequence)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+            elif repetitions < 1 or repetitions > 100:
                 raise HTTPException(status_code=400, detail="Repetitions must be between 1 and 100")
 
             if language == "auto":
@@ -59,26 +72,42 @@ def repeat_audio_endpoint(
 
             engine_enum = TTSService.parse_engine(engine)
 
-            audio_path, total_duration = tts_service.generate_and_repeat(
-                text=text,
-                repetitions=repetitions,
-                language=language,
-                slow=slow,
-                engine=engine_enum,
-                voice=voice
-            )
+            if steps:
+                audio_path, total_duration = tts_service.generate_sequence(
+                    text=text,
+                    steps=steps,
+                    language=language,
+                    engine=engine_enum,
+                    voice=voice
+                )
+                message = (
+                    f"Audio generated with sequence {describe_sequence(steps)} "
+                    f"({total_repetitions(steps)} repetitions)"
+                )
+            else:
+                audio_path, total_duration = tts_service.generate_and_repeat(
+                    text=text,
+                    repetitions=repetitions,
+                    language=language,
+                    slow=slow,
+                    engine=engine_enum,
+                    voice=voice
+                )
+                message = f"Audio generated and repeated {repetitions} times"
 
             filename = audio_path.name
-            logger.info(f"Audio repetition successful: {filename} ({repetitions}x)")
+            logger.info(f"Audio repetition successful: {filename}")
 
             return ConversionResult(
                 success=True,
                 audio_filename=filename,
                 audio_url=f"/download/{filename}",
                 duration=total_duration,
-                message=f"Audio generated and repeated {repetitions} times"
+                message=message
             )
 
+        except HTTPException:
+            raise
         except Exception as e:
             log_error(logger, e, "audio repetition")
             raise HTTPException(status_code=500, detail=f"Audio repetition failed: {str(e)}")

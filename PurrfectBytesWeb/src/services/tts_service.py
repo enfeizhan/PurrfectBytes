@@ -362,6 +362,75 @@ class TTSService:
                     pass
             raise Exception(f"Failed to repeat and concatenate audio: {str(e)}")
     
+    def generate_sequence(
+        self,
+        text: str,
+        steps: List["SequenceStep"],
+        language: str = "en",
+        engine: Optional[TTSEngine] = None,
+        voice: Optional[str] = None
+    ) -> Tuple[Path, float]:
+        """
+        Generate audio following a speed sequence (e.g. 2 normal, 3 slow, 2 normal).
+
+        Synthesizes the text once per distinct speed, then concatenates the
+        renditions in step order.
+
+        Args:
+            text: Text to convert to speech
+            steps: Ordered SequenceSteps (count + slow flag per step)
+            language: Language code for TTS
+            engine: TTS engine to use (defaults to self.default_engine)
+            voice: Optional specific voice to use
+
+        Returns:
+            Tuple of (concatenated_file_path, total_duration)
+
+        Raises:
+            Exception: If generation or concatenation fails
+        """
+        from src.utils.sequence_utils import sequence_slug
+
+        if not steps:
+            raise ValueError("Sequence must contain at least one step")
+
+        audio_by_speed: dict = {}
+        duration_by_speed: dict = {}
+
+        try:
+            for slow_flag in sorted({step.slow for step in steps}):
+                audio_by_speed[slow_flag], duration_by_speed[slow_flag] = self.generate_audio(
+                    text, language, slow_flag, engine, voice
+                )
+
+            ordered_paths = [
+                audio_by_speed[step.slow] for step in steps for _ in range(step.count)
+            ]
+            output_filename = (
+                f"seq_{sequence_slug(steps)}_{filename_slug(text)}"
+                f"_{uuid.uuid4().hex[:8]}.{self.audio_config['format']}"
+            )
+            output_path = self.concatenate_audio(ordered_paths, output_filename)
+
+            total_duration = sum(
+                step.count * duration_by_speed[step.slow] for step in steps
+            )
+            return output_path, total_duration
+
+        except Exception as e:
+            raise Exception(f"Failed to generate sequence audio: {str(e)}")
+
+        finally:
+            # The per-speed sources are intermediate; remove them and their
+            # word-timing sidecars regardless of outcome.
+            for source_path in audio_by_speed.values():
+                for path in (source_path, source_path.with_name(source_path.name + ".words.json")):
+                    if path.exists():
+                        try:
+                            path.unlink()
+                        except OSError:
+                            pass
+
     def get_available_engines(self) -> List[dict]:
         """
         Get list of available TTS engines.

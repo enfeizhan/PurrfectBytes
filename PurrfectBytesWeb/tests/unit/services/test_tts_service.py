@@ -138,6 +138,76 @@ class TestTTSService:
         """Empty text produces no timings."""
         assert compute_character_timings("", 3.0) == []
 
+    def test_generate_sequence_orders_and_cleans_up(self, tts_service, audio_dir, mocker):
+        """Sequence synthesizes once per speed, concatenates in order, removes sources."""
+        from src.utils.sequence_utils import parse_sequence
+
+        normal = audio_dir / "normal.mp3"
+        slow = audio_dir / "slow.mp3"
+        normal.write_bytes(b"n")
+        slow.write_bytes(b"s")
+        normal_sidecar = audio_dir / "normal.mp3.words.json"
+        normal_sidecar.write_text("[]")
+
+        generate = mocker.patch.object(
+            tts_service, "generate_audio",
+            side_effect=lambda text, lang, slow_flag, engine=None, voice=None:
+                (slow, 4.0) if slow_flag else (normal, 3.0)
+        )
+        output = audio_dir / "out.mp3"
+        concat = mocker.patch.object(tts_service, "concatenate_audio", return_value=output)
+
+        steps = parse_sequence("2n,3s")
+        result_path, duration = tts_service.generate_sequence("hello", steps)
+
+        assert result_path == output
+        assert duration == pytest.approx(2 * 3.0 + 3 * 4.0)
+        # One synthesis per distinct speed
+        assert generate.call_count == 2
+        # Concatenation receives the expanded, ordered path list
+        ordered_paths, output_filename = concat.call_args[0]
+        assert ordered_paths == [normal, normal, slow, slow, slow]
+        assert output_filename.startswith("seq_2n-3s_")
+        # Per-speed sources and sidecars are removed
+        assert not normal.exists()
+        assert not slow.exists()
+        assert not normal_sidecar.exists()
+
+    def test_generate_sequence_single_speed_synthesizes_once(self, tts_service, audio_dir, mocker):
+        """An all-normal sequence only synthesizes one audio."""
+        from src.utils.sequence_utils import parse_sequence
+
+        normal = audio_dir / "normal.mp3"
+        normal.write_bytes(b"n")
+        generate = mocker.patch.object(
+            tts_service, "generate_audio", return_value=(normal, 2.0)
+        )
+        concat = mocker.patch.object(
+            tts_service, "concatenate_audio", return_value=audio_dir / "out.mp3"
+        )
+
+        _, duration = tts_service.generate_sequence("hi", parse_sequence("2n,3n"))
+
+        assert generate.call_count == 1
+        assert duration == pytest.approx(5 * 2.0)
+        assert concat.call_args[0][0] == [normal] * 5
+
+    def test_generate_sequence_cleans_up_on_failure(self, tts_service, audio_dir, mocker):
+        """Sources are removed even when concatenation fails."""
+        from src.utils.sequence_utils import parse_sequence
+
+        normal = audio_dir / "normal.mp3"
+        normal.write_bytes(b"n")
+        mocker.patch.object(tts_service, "generate_audio", return_value=(normal, 2.0))
+        mocker.patch.object(
+            tts_service, "concatenate_audio", side_effect=Exception("boom")
+        )
+
+        with pytest.raises(Exception, match="Failed to generate sequence audio"):
+            tts_service.generate_sequence("hi", parse_sequence("2n"))
+
+        assert not normal.exists()
+
     def test_cleanup_old_files(self, tts_service, audio_dir):
         """Test cleaning up old audio files."""
         # Create test files

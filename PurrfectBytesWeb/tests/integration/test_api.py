@@ -138,6 +138,58 @@ class TestAPIEndpoints:
         data = response.json()
         assert data["success"] is True
     
+    def test_convert_to_video_with_sequence(self, client, mock_all_external_deps):
+        """Video conversion honors a normal/slow speed sequence."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/convert-to-video", data={
+            "text": "Hi",
+            "language": "en",
+            "sequence": "1n,1s"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["video_filename"].startswith("seq_1n-1s_")
+        assert data["duration"] > 0
+        assert "sequence 1 normal, 1 slow" in data["message"]
+
+    def test_convert_to_video_invalid_sequence(self, client):
+        """Invalid sequence specs are rejected with 400 before any generation."""
+        for bad in ("0n", "101n", "2x"):
+            response = client.post("/convert-to-video", data={
+                "text": "Hi",
+                "sequence": bad
+            })
+            assert response.status_code == 400
+
+    def test_repeat_audio_with_sequence(self, client, mock_all_external_deps):
+        """Audio repetition honors a normal/slow speed sequence."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/repeat-audio", data={
+            "text": "Hi",
+            "language": "en",
+            "sequence": "2n,1s"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["audio_filename"].startswith("seq_2n-1s_")
+        assert "sequence 2 normal, 1 slow" in data["message"]
+        assert "3 repetitions" in data["message"]
+
+    def test_repeat_audio_invalid_sequence(self, client):
+        """Invalid sequence specs are rejected with 400."""
+        for bad in ("0n", "101n", "abc"):
+            response = client.post("/repeat-audio", data={
+                "text": "Hi",
+                "sequence": bad
+            })
+            assert response.status_code == 400
+
     def test_download_audio_not_found(self, client):
         """Test downloading non-existent audio file."""
         response = client.get("/download/nonexistent.mp3")
