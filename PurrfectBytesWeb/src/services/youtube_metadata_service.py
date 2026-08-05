@@ -15,7 +15,7 @@ ALL explanations, descriptions, breakdowns, and grammar points MUST be written i
 
 NEVER ask follow-up questions - generate the complete output immediately based on the given sentence.
 
-BOLD FORMATTING RULE: Use SINGLE asterisks (*text*) for bold, never double asterisks. YouTube only renders bold when both asterisks are surrounded by whitespace or a line boundary — an asterisk touching any punctuation (e.g. "(*word*)") renders as a literal asterisk. Therefore NEVER place asterisks adjacent to parentheses, quotes, commas, or other punctuation. In breakdowns and grammar points, bold ONLY the original-script headword; leave the phonetics inside parentheses unformatted. Correct: *メッセージ* (めっせーじ) = Message. Wrong: メッセージ (*めっせーじ*) = Message.
+BOLD FORMATTING RULE: Use SINGLE asterisks (*text*) for bold, never double asterisks. YouTube only renders bold when both asterisks are surrounded by whitespace or a line boundary — an asterisk touching any punctuation (e.g. "(*word*)") renders as a literal asterisk. Therefore NEVER place asterisks adjacent to parentheses, quotes, commas, or other punctuation. In breakdowns and grammar points, bold ONLY the original-script headword; leave the phonetics inside parentheses unformatted. Correct: *メッセージ* (めっせーじ) = Message. Wrong: メッセージ (*めっせーじ*) = Message. Always use ASCII parentheses ( ) with a space before the opening parenthesis — NEVER full-width parentheses （）, which would touch the asterisk and break the bold.
 
 Identify the language automatically.
 
@@ -29,9 +29,9 @@ MANDATORY FORMATTING for Breakdowns/Grammar: You must start with the [Original S
 
 Example for English Breakdown: *Word* (IPA Phonetics) = English Meaning.
 
-Break down the sentence into meaningful components (explanations in English). Ignore overly simple or basic words that even absolute beginners would already know. Focus on the core vocabulary and phrases.
+Break down the sentence (explanations in English). Be SELECTIVE, not exhaustive — this is not a word-by-word gloss. Include only vocabulary, collocations, set phrases, and idioms that an intermediate learner of the target language would plausibly not know. NEVER include beginner-level items (everyday nouns, pronouns, numbers, greetings, basic function words, the most common verbs), no matter how difficult the rest of the sentence is. Prefer meaningful multi-word chunks over splitting them into their parts: when a phrase's meaning or usage is not obvious from its individual words, list the whole phrase as one item rather than each word separately. List items in the order they appear in the sentence. Where useful, append a short nuance note after the meaning (register, formality, common pairings).
 
-Highlight 2-4 key grammar points (explanations in English).
+Highlight 2-4 key grammar points (explanations in English). Grammar Points and Breakdown must not overlap: purely grammatical machinery (particles, conjugations and verb forms, tense/aspect/mood markers, conditionals, sentence endings, connectors, agreement patterns — whatever the target language uses) goes ONLY under Grammar Points, never in Breakdown; content vocabulary and lexical chunks go under Breakdown. Do not drop an item just because it could fit either section.
 
 Match the proficiency level appropriately (beginner/intermediate/advanced).
 
