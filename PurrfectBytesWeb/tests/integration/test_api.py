@@ -1,5 +1,7 @@
 """Integration tests for API endpoints."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -189,6 +191,233 @@ class TestAPIEndpoints:
                 "sequence": bad
             })
             assert response.status_code == 400
+
+    def test_repeat_audio_conversation(self, client, mock_all_external_deps):
+        """Conversation mode alternates two voices across lines."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/repeat-audio", data={
+            "text": "Hello\nHi there",
+            "language": "en",
+            "conversation": "true",
+            "repetitions": "2"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["audio_filename"].startswith("conv_2lines_")
+        assert "2 lines, 2 voices" in data["message"]
+        assert "2 repetitions" in data["message"]
+
+    def test_repeat_audio_conversation_needs_two_lines(self, client):
+        """A single-line text is rejected in conversation mode."""
+        response = client.post("/repeat-audio", data={
+            "text": "Hello",
+            "conversation": "true"
+        })
+        assert response.status_code == 400
+        assert "at least 2 lines" in response.json()["detail"]
+
+    def test_repeat_audio_conversation_with_sequence(self, client, mock_all_external_deps):
+        """A speed sequence repeats the whole conversation at each step's speed."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/repeat-audio", data={
+            "text": "Hello\nHi there",
+            "language": "en",
+            "conversation": "true",
+            "sequence": "1n,1s"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["audio_filename"].startswith("conv_2lines_1n-1s_")
+        assert "2 lines, 2 voices" in data["message"]
+        assert "sequence 1 normal, 1 slow" in data["message"]
+        assert "2 repetitions" in data["message"]
+
+    def test_convert_to_video_conversation(self, client, mock_all_external_deps):
+        """Conversation video renders one clip per line and concatenates them."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/convert-to-video", data={
+            "text": "Hi\nHello",
+            "language": "en",
+            "conversation": "true",
+            "repetitions": "1"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["video_filename"].startswith("conv_2lines_")
+        assert data["audio_filename"].startswith("conv_2lines_")
+        assert "2 lines, 2 voices" in data["message"]
+
+    def test_convert_to_video_conversation_with_sequence(self, client, mock_all_external_deps):
+        """A speed sequence repeats the whole conversation video at each step's speed."""
+        mock_all_external_deps['gtts'].save = lambda path: None
+
+        response = client.post("/convert-to-video", data={
+            "text": "Hi\nHello",
+            "language": "en",
+            "conversation": "true",
+            "sequence": "1n,1s"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["video_filename"].startswith("conv_2lines_1n-1s_")
+        assert "sequence 1 normal, 1 slow" in data["message"]
+
+    def test_sources_crud_round_trip(self, client, temp_dir, monkeypatch):
+        """Saved text sources can be created, listed, and deleted."""
+        monkeypatch.setattr(
+            "src.config.settings.SAVED_SOURCES_FILE",
+            str(temp_dir / "saved_sources.json"),
+        )
+
+        response = client.get("/sources")
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "sources": []}
+
+        response = client.post("/sources", data={
+            "name": "Shin Kanzen Master N1",
+            "credit": "This sentence comes from the textbook 新完全マスター N1."
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        source_id = data["source"]["id"]
+
+        response = client.get("/sources")
+        sources = response.json()["sources"]
+        assert len(sources) == 1
+        assert sources[0]["name"] == "Shin Kanzen Master N1"
+
+        response = client.delete(f"/sources/{source_id}")
+        assert response.json()["success"] is True
+        assert client.get("/sources").json()["sources"] == []
+
+        # Deleting again fails gracefully
+        assert client.delete(f"/sources/{source_id}").json()["success"] is False
+
+    def test_sources_rejects_empty_fields(self, client, temp_dir, monkeypatch):
+        """Empty name or credit is rejected."""
+        monkeypatch.setattr(
+            "src.config.settings.SAVED_SOURCES_FILE",
+            str(temp_dir / "saved_sources.json"),
+        )
+        response = client.post("/sources", data={"name": "  ", "credit": "x"})
+        assert response.json()["success"] is False
+
+    def test_generate_metadata_passes_source_credit(self, client, temp_dir, monkeypatch, mocker):
+        """A selected saved source's credit line is passed to the metadata service."""
+        monkeypatch.setattr(
+            "src.config.settings.SAVED_SOURCES_FILE",
+            str(temp_dir / "saved_sources.json"),
+        )
+        from src.api import youtube_routes
+        generate = mocker.patch.object(
+            youtube_routes.metadata_service, "generate",
+            return_value={"title": "t", "description": "d"},
+        )
+
+        source = youtube_routes.source_store.add_source("Book", "From a great book.")
+        response = client.post("/generate-youtube-metadata", data={
+            "text": "Hello",
+            "provider": "gemini",
+            "source_id": source["id"]
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert generate.call_args.kwargs["credit"] == "From a great book."
+
+    def test_generate_metadata_unknown_source(self, client, temp_dir, monkeypatch):
+        """An unknown source id fails without calling the LLM."""
+        monkeypatch.setattr(
+            "src.config.settings.SAVED_SOURCES_FILE",
+            str(temp_dir / "saved_sources.json"),
+        )
+        response = client.post("/generate-youtube-metadata", data={
+            "text": "Hello",
+            "source_id": "deadbeef"
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "Unknown text source" in data["error"]
+
+    def test_extract_items_returns_items(self, client, mocker):
+        """Extraction endpoint returns the service's item list."""
+        from src.api import youtube_routes
+        items = [{"kind": "vocabulary", "term": "元気", "phonetics": "げんき", "meaning": "healthy"}]
+        extract = mocker.patch.object(
+            youtube_routes.metadata_service, "extract_items", return_value=items,
+        )
+
+        response = client.post("/extract-youtube-items", data={
+            "text": "元気ですか",
+            "provider": "gemini"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["items"] == items
+        assert extract.call_args.args == ("元気ですか", "gemini")
+
+    def test_extract_items_reports_errors_in_body(self, client, mocker):
+        """Extraction failures follow the router's in-body error convention."""
+        from src.api import youtube_routes
+        mocker.patch.object(
+            youtube_routes.metadata_service, "extract_items",
+            side_effect=ValueError("Could not extract items - try again"),
+        )
+        response = client.post("/extract-youtube-items", data={"text": "Hello"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "Could not extract items" in data["error"]
+
+    def test_generate_metadata_passes_approved_items(self, client, mocker):
+        """Ticked items are decoded from JSON and forwarded to the service."""
+        from src.api import youtube_routes
+        generate = mocker.patch.object(
+            youtube_routes.metadata_service, "generate",
+            return_value={"title": "t", "description": "d"},
+        )
+
+        items = [{"kind": "grammar", "term": "ですか", "phonetics": "", "meaning": "question"}]
+        response = client.post("/generate-youtube-metadata", data={
+            "text": "元気ですか",
+            "provider": "gemini",
+            "items": json.dumps(items),
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert generate.call_args.kwargs["items"] == items
+
+    def test_generate_metadata_rejects_bad_items_json(self, client, mocker):
+        """Malformed items never reach the LLM."""
+        from src.api import youtube_routes
+        generate = mocker.patch.object(youtube_routes.metadata_service, "generate")
+
+        for bad in ["not json", '{"kind": "vocabulary"}']:
+            response = client.post("/generate-youtube-metadata", data={
+                "text": "Hello",
+                "items": bad,
+            })
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert "Invalid items selection" in data["error"]
+        generate.assert_not_called()
 
     def test_download_audio_not_found(self, client):
         """Test downloading non-existent audio file."""

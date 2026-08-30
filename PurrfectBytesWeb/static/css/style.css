@@ -86,6 +86,29 @@ input[type="number"]:focus {
     align-items: center;
 }
 
+.source-form input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+}
+
+.source-form input[type="text"]:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.source-form textarea {
+    min-height: 60px;
+    margin-top: 10px;
+}
+
+.source-form .inline-btn {
+    margin-top: 10px;
+}
+
 .field-grow {
     flex: 1;
 }
@@ -359,6 +382,28 @@ button.loading .spinner {
     max-height: 400px;
     overflow-y: auto;
     line-height: 1.5;
+}
+
+.items-subheading {
+    font-weight: 600;
+    color: #555;
+    font-size: 14px;
+    margin: 14px 0 6px;
+}
+
+.items-checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.item-row {
+    margin: 0;
+}
+
+.item-row span {
+    font-size: 14px;
+    color: #333;
 }
 
 /* Preview */

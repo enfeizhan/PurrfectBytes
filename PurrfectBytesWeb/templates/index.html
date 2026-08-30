@@ -51,6 +51,23 @@
             </div>
 
             <div class="checkbox-group">
+                <input type="checkbox" id="conversationToggle">
+                <label for="conversationToggle">Conversation mode (two voices)</label>
+            </div>
+
+            <div id="conversationOptions" class="form-group" style="display: none;">
+                <label for="voiceSelectB">Second voice (speaker B):</label>
+                <select id="voiceSelectB">
+                    <option value="">Default voice</option>
+                </select>
+                <small class="hint">
+                    Lines of the text alternate between the two voices: line 1 → Voice,
+                    line 2 → Second voice, and so on. Needs at least 2 lines.
+                    Combine with a speed sequence to repeat the whole conversation at mixed speeds.
+                </small>
+            </div>
+
+            <div class="checkbox-group">
                 <input type="checkbox" id="sequenceToggle">
                 <label for="sequenceToggle">Custom speed sequence</label>
             </div>
@@ -153,6 +170,46 @@
                     <option value="anthropic">🧠 Anthropic Claude</option>
                 </select>
                 <div id="providerStatus" class="status-line"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="sourceSelect">Text source (for the credit line):</label>
+                <div class="field-row">
+                    <select id="sourceSelect" class="field-grow">
+                        <option value="">— Generic credit —</option>
+                    </select>
+                    <button type="button" id="addSourceBtn" class="inline-btn">+ New</button>
+                    <button type="button" id="deleteSourceBtn" class="inline-btn">🗑 Delete</button>
+                </div>
+                <small class="hint">The saved credit line replaces the generic "another creator's content" credit</small>
+            </div>
+
+            <div id="sourceForm" class="form-group source-form" style="display: none;">
+                <input type="text" id="sourceName" placeholder="Source name (e.g. Shin Kanzen Master N1)">
+                <textarea id="sourceCredit" rows="2"
+                    placeholder="Exact credit line, e.g. This sentence comes from the textbook 新完全マスター N1 by 3A Corporation."></textarea>
+                <button type="button" id="saveSourceBtn" class="inline-btn">💾 Save source</button>
+            </div>
+
+            <button type="button" id="extractItemsBtn" class="youtube-btn">
+                <span class="button-text">🔍 Extract Vocabulary & Grammar (review before generating)</span>
+                <div class="spinner"></div>
+            </button>
+
+            <div id="itemsCard" class="metadata-card" style="display: none;">
+                <div class="metadata-field">
+                    <div class="metadata-header">
+                        <label>Review items</label>
+                    </div>
+                    <small class="hint">
+                        Untick anything mis-identified or not worth explaining, then click Generate below.
+                        The description will contain exactly the ticked items.
+                    </small>
+                    <div class="items-subheading">🔤 Breakdown</div>
+                    <div id="itemsVocabList" class="items-checklist"></div>
+                    <div class="items-subheading">📚 Grammar Points</div>
+                    <div id="itemsGrammarList" class="items-checklist"></div>
+                </div>
             </div>
 
             <button type="button" id="generateMetadataBtn" class="youtube-btn">

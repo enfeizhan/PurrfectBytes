@@ -10,6 +10,9 @@ const autoDetectBtn = document.getElementById('autoDetectBtn');
 const detectionResult = document.getElementById('detectionResult');
 const ttsEngineSelect = document.getElementById('ttsEngine');
 const voiceSelect = document.getElementById('voiceSelect');
+const voiceSelectB = document.getElementById('voiceSelectB');
+const conversationToggle = document.getElementById('conversationToggle');
+const conversationOptions = document.getElementById('conversationOptions');
 const engineDescription = document.getElementById('engineDescription');
 const engineStatus = document.getElementById('engineStatus');
 
@@ -129,13 +132,15 @@ async function loadVoices() {
     const cacheKey = `${engine}:${language}`;
 
     const applyVoices = (voices) => {
-        voiceSelect.innerHTML = '<option value="">Default voice</option>';
-        voices.forEach(v => {
-            const opt = document.createElement('option');
-            opt.value = v.id;
-            opt.textContent = v.name;
-            voiceSelect.appendChild(opt);
-        });
+        for (const select of [voiceSelect, voiceSelectB]) {
+            select.innerHTML = '<option value="">Default voice</option>';
+            voices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = v.name;
+                select.appendChild(opt);
+            });
+        }
     };
 
     if (voiceCache[cacheKey]) {
@@ -153,12 +158,14 @@ async function loadVoices() {
     } catch (error) {
         console.error('Failed to load voices:', error);
         voiceSelect.innerHTML = '<option value="">Default voice</option>';
+        voiceSelectB.innerHTML = '<option value="">Default voice</option>';
     }
 }
 
 ttsEngineSelect.addEventListener('change', () => {
     updateEngineDescription();
     loadVoices();
+    updateConversationAvailability();
 });
 languageSelect.addEventListener('change', loadVoices);
 
@@ -208,6 +215,8 @@ async function detectLanguage(text) {
 textArea.addEventListener('input', function () {
     clearTimeout(detectionTimeout);
     const text = this.value;
+
+    invalidateExtractedItems();
 
     if (text.trim().length >= 10) {  // Only detect after 10+ characters
         detectionTimeout = setTimeout(() => {
@@ -320,12 +329,40 @@ function serializeSequence() {
     return parts.join(',');
 }
 
+// ========== Conversation mode (two voices) ==========
+
+// gTTS ignores voice selection entirely, so two voices are impossible there
+function updateConversationAvailability() {
+    const supported = ttsEngineSelect.value !== 'gtts';
+    conversationToggle.disabled = !supported;
+    conversationToggle.closest('.checkbox-group').classList.toggle('is-overridden', !supported);
+    conversationToggle.closest('.checkbox-group').title =
+        supported ? '' : 'Conversation mode needs a voice-capable engine (e.g. Edge TTS)';
+    if (!supported && conversationToggle.checked) {
+        conversationToggle.checked = false;
+        conversationToggle.dispatchEvent(new Event('change'));
+    }
+}
+
+conversationToggle.addEventListener('change', () => {
+    conversationOptions.style.display = conversationToggle.checked ? 'block' : 'none';
+});
+
 // ========== Conversion ==========
 
 async function handleConversion(endpoint, isVideo = false) {
     const sequence = sequenceToggle.checked ? serializeSequence() : null;
     if (sequenceToggle.checked && !sequence) {
         return;   // invalid rows — toast already shown
+    }
+
+    const conversation = conversationToggle.checked;
+    if (conversation) {
+        const lines = textArea.value.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) {
+            showToast('Conversation mode needs at least 2 lines of text');
+            return;
+        }
     }
 
     const button = isVideo ? videoBtn : audioBtn;
@@ -358,6 +395,12 @@ async function handleConversion(endpoint, isVideo = false) {
     formData.append('engine', ttsEngineSelect.value);
     if (voiceSelect.value) {
         formData.append('voice', voiceSelect.value);
+    }
+    if (conversation) {
+        formData.append('conversation', 'true');
+        if (voiceSelectB.value) {
+            formData.append('voice_b', voiceSelectB.value);
+        }
     }
 
     if (isVideo) {
@@ -446,9 +489,9 @@ async function handleConversion(endpoint, isVideo = false) {
 
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    // Repetitions and sequences on audio are handled by /repeat-audio
+    // Repetitions, sequences and conversations on audio are handled by /repeat-audio
     const repetitions = parseInt(document.getElementById('repetitions').value) || 10;
-    const useRepeatEndpoint = sequenceToggle.checked || repetitions > 1;
+    const useRepeatEndpoint = sequenceToggle.checked || conversationToggle.checked || repetitions > 1;
     handleConversion(useRepeatEndpoint ? '/repeat-audio' : '/convert', false);
 });
 
@@ -485,6 +528,12 @@ previewBtn.addEventListener('click', async (e) => {
     formData.append('font_size', parseInt(document.getElementById('fontSize').value) || 48);
     formData.append('show_qr_code', document.getElementById('showQrCode').checked ? 'true' : 'false');
     formData.append('highlight_position', 0);  // Highlight first character
+    if (conversationToggle.checked) {
+        formData.append('conversation', 'true');
+    }
+    if (document.getElementById('slow').checked) {
+        formData.append('slow', 'true');
+    }
 
     try {
         const response = await fetch('/preview', {
@@ -550,6 +599,13 @@ function displayName(filename) {
     if (seqMatch) {
         repeat = `[${seqMatch[1].replace(/-/g, ',')}] `;
         name = name.slice(seqMatch[0].length);
+    }
+
+    // "conv_4lines_..." → "[dialogue] ..." ("conv_4lines_2n-3s_..." → "[dialogue 2n,3s] ...")
+    const convMatch = name.match(/^conv_(\d+)lines_(?:(\d+[ns](?:-\d+[ns])*)_)?/);
+    if (convMatch) {
+        repeat += convMatch[2] ? `[dialogue ${convMatch[2].replace(/-/g, ',')}] ` : '[dialogue] ';
+        name = name.slice(convMatch[0].length);
     }
 
     name = name.replace(/^(edge|gtts|piper|concat)_/, '');
@@ -640,6 +696,99 @@ const metadataTitle = document.getElementById('metadataTitle');
 const metadataDescription = document.getElementById('metadataDescription');
 const llmProvider = document.getElementById('llmProvider');
 
+// ========== Vocabulary/grammar extraction (review before generating) ==========
+
+const extractItemsBtn = document.getElementById('extractItemsBtn');
+const itemsCard = document.getElementById('itemsCard');
+const itemsVocabList = document.getElementById('itemsVocabList');
+const itemsGrammarList = document.getElementById('itemsGrammarList');
+
+let extractedItems = null;      // items returned by /extract-youtube-items
+let extractedForText = null;    // the exact sentence they were extracted for
+
+function invalidateExtractedItems() {
+    if (extractedForText !== null && textArea.value.trim() !== extractedForText) {
+        extractedItems = null;
+        extractedForText = null;
+        itemsCard.style.display = 'none';
+        itemsVocabList.innerHTML = '';
+        itemsGrammarList.innerHTML = '';
+    }
+}
+
+function renderExtractedItems() {
+    itemsVocabList.innerHTML = '';
+    itemsGrammarList.innerHTML = '';
+    extractedItems.forEach((item, index) => {
+        const label = document.createElement('label');
+        label.className = 'checkbox-inline item-row';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.dataset.index = index;
+        const span = document.createElement('span');
+        const phonetics = item.phonetics ? ` (${item.phonetics})` : '';
+        span.textContent = `${item.term}${phonetics} = ${item.meaning}`;
+        label.appendChild(checkbox);
+        label.appendChild(span);
+        (item.kind === 'grammar' ? itemsGrammarList : itemsVocabList).appendChild(label);
+    });
+    itemsCard.style.display = 'block';
+}
+
+// The ticked subset for the current sentence, or null when no valid checklist
+function tickedItems() {
+    if (!extractedItems || extractedForText !== textArea.value.trim()) {
+        return null;
+    }
+    const ticked = [];
+    itemsCard.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        if (cb.checked) {
+            ticked.push(extractedItems[parseInt(cb.dataset.index, 10)]);
+        }
+    });
+    return ticked;
+}
+
+extractItemsBtn.addEventListener('click', async () => {
+    const text = textArea.value.trim();
+    if (!text) {
+        showToast('Please enter some text first');
+        return;
+    }
+
+    extractItemsBtn.classList.add('loading');
+    extractItemsBtn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('text', text);
+        formData.append('provider', llmProvider.value);
+
+        const response = await fetch('/extract-youtube-items', {
+            method: 'POST',
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            extractedItems = data.items;
+            extractedForText = text;
+            renderExtractedItems();
+            itemsCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            showToast(`Extraction failed: ${data.error || data.detail || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Item extraction error:', error);
+        showToast('Failed to extract items. Please check your API key and try again.');
+    } finally {
+        extractItemsBtn.classList.remove('loading');
+        extractItemsBtn.disabled = false;
+    }
+});
+
 generateMetadataBtn.addEventListener('click', async () => {
     const text = textArea.value.trim();
     if (!text) {
@@ -654,6 +803,13 @@ generateMetadataBtn.addEventListener('click', async () => {
         const formData = new FormData();
         formData.append('text', text);
         formData.append('provider', llmProvider.value);
+        if (sourceSelect.value) {
+            formData.append('source_id', sourceSelect.value);
+        }
+        const ticked = tickedItems();
+        if (ticked !== null) {
+            formData.append('items', JSON.stringify(ticked));
+        }
 
         const response = await fetch('/generate-youtube-metadata', {
             method: 'POST',
@@ -711,6 +867,95 @@ async function checkProviderAvailability() {
         console.error('Failed to check providers:', e);
     }
 }
+
+// ========== Saved text sources (credit lines) ==========
+
+const sourceSelect = document.getElementById('sourceSelect');
+const sourceForm = document.getElementById('sourceForm');
+const sourceNameInput = document.getElementById('sourceName');
+const sourceCreditInput = document.getElementById('sourceCredit');
+const addSourceBtn = document.getElementById('addSourceBtn');
+const saveSourceBtn = document.getElementById('saveSourceBtn');
+const deleteSourceBtn = document.getElementById('deleteSourceBtn');
+
+async function loadSavedSources(selectId = null) {
+    try {
+        const response = await fetch('/sources');
+        const data = await response.json();
+        if (!data.success) return;
+
+        const current = selectId || sourceSelect.value;
+        sourceSelect.innerHTML = '<option value="">— Generic credit —</option>';
+        data.sources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = s.name;
+            opt.title = s.credit;
+            sourceSelect.appendChild(opt);
+        });
+        sourceSelect.value = current;
+        if (sourceSelect.value !== current) {
+            sourceSelect.value = '';
+        }
+    } catch (e) {
+        console.error('Failed to load saved sources:', e);
+    }
+}
+
+addSourceBtn.addEventListener('click', () => {
+    sourceForm.style.display = sourceForm.style.display === 'none' ? 'block' : 'none';
+});
+
+saveSourceBtn.addEventListener('click', async () => {
+    const name = sourceNameInput.value.trim();
+    const credit = sourceCreditInput.value.trim();
+    if (!name || !credit) {
+        showToast('Both a source name and a credit line are required');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('credit', credit);
+        const response = await fetch('/sources', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (data.success) {
+            sourceNameInput.value = '';
+            sourceCreditInput.value = '';
+            sourceForm.style.display = 'none';
+            await loadSavedSources(data.source.id);
+            showToast(`Saved source: ${data.source.name}`, false);
+        } else {
+            showToast(`Failed to save source: ${data.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        console.error('Failed to save source:', e);
+        showToast('Failed to save source. Please try again.');
+    }
+});
+
+deleteSourceBtn.addEventListener('click', async () => {
+    if (!sourceSelect.value) {
+        showToast('Select a saved source to delete');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/sources/${encodeURIComponent(sourceSelect.value)}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast('Source deleted', false);
+            sourceSelect.value = '';
+            await loadSavedSources();
+        } else {
+            showToast(`Failed to delete source: ${data.error || 'Unknown error'}`);
+        }
+    } catch (e) {
+        console.error('Failed to delete source:', e);
+        showToast('Failed to delete source. Please try again.');
+    }
+});
 
 // ========== YouTube OAuth & Upload ==========
 
@@ -867,7 +1112,9 @@ uploadYoutubeBtn.addEventListener('click', async () => {
 document.addEventListener('DOMContentLoaded', () => {
     loadLanguages().then(loadVoices);
     checkEngineAvailability();
+    updateConversationAvailability();
     checkProviderAvailability();
+    loadSavedSources();
     checkYouTubeAuth();
     loadRecentFiles();
 });
