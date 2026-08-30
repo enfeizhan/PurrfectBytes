@@ -19,10 +19,16 @@ from src.services.video_service import VideoService
 from src.config.settings import VIDEO_DIR
 from src.utils.logger import get_logger, RequestLogger, log_error
 from src.utils.sequence_utils import (
+    SequenceStep,
     parse_sequence,
     sequence_slug,
     describe_sequence,
     total_repetitions,
+)
+from src.utils.dialogue_utils import (
+    parse_dialogue,
+    describe_dialogue,
+    dialogue_display_text,
 )
 
 language_service = LanguageDetectionService()
@@ -79,19 +85,34 @@ def convert_to_video(
     show_qr_code: bool = Form(False),
     engine: str = Form("edge"),
     voice: Optional[str] = Form(None),
-    sequence: Optional[str] = Form(None)
+    sequence: Optional[str] = Form(None),
+    conversation: bool = Form(False),
+    voice_b: Optional[str] = Form(None)
 ):
     """Convert text to video with synchronized highlighting using the specified TTS engine.
 
     When `sequence` is provided (e.g. "2n,3s" = 2 normal then 3 slow), it takes
-    precedence over `repetitions` and `slow`.
+    precedence over `repetitions` and `slow`. When `conversation` is set, lines
+    of the text alternate between `voice` and `voice_b`, each rendered as its
+    own clip and concatenated; combined with a sequence, each step plays the
+    whole conversation at that step's speed.
     """
-    with RequestLogger(logger, f"video conversion ({language}, font_size={font_size}, engine={engine}, reps={repetitions}, seq={sequence})"):
+    with RequestLogger(logger, f"video conversion ({language}, font_size={font_size}, engine={engine}, reps={repetitions}, seq={sequence}, conv={conversation})"):
         audio_by_speed = {}
         video_by_speed = {}
+        line_audios = []
+        line_videos = []
         video_path = None
+        audio_path = None
 
         try:
+            dialogue = None
+            if conversation:
+                try:
+                    dialogue = parse_dialogue(text)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+
             steps = None
             if sequence:
                 try:
@@ -118,22 +139,107 @@ def convert_to_video(
             from src.utils.text_utils import filename_slug
 
             duration_by_speed = {}
-            # Render one audio+video per distinct speed. Must stay sequential:
-            # video encoding uses a shared temp-audio.m4a scratch file.
-            for slow_flag in sorted({s.slow for s in steps} if steps else {slow}):
-                logger.info(f"Generating audio for video with engine={engine} (slow={slow_flag})")
-                audio_by_speed[slow_flag], duration_by_speed[slow_flag] = tts_service.generate_audio(
-                    text, language, slow_flag, engine=engine_enum, voice=voice
-                )
+            # Render one audio+video per distinct speed (or per dialogue line).
+            # Must stay sequential: video encoding uses a shared temp-audio.m4a
+            # scratch file.
+            if dialogue is None:
+                for slow_flag in sorted({s.slow for s in steps} if steps else {slow}):
+                    logger.info(f"Generating audio for video with engine={engine} (slow={slow_flag})")
+                    audio_by_speed[slow_flag], duration_by_speed[slow_flag] = tts_service.generate_audio(
+                        text, language, slow_flag, engine=engine_enum, voice=voice
+                    )
 
-                speed_prefix = "slow_" if slow_flag else ""
-                single_video_path = VIDEO_DIR / f"{speed_prefix}{filename_slug(text)}_{uuid.uuid4().hex[:8]}.mp4"
-                logger.info(f"Generating video with character highlighting (font_size={font_size}, slow={slow_flag})")
-                create_video_with_text(text, audio_by_speed[slow_flag], single_video_path,
-                                       font_size=font_size, show_qr_code=show_qr_code)
-                video_by_speed[slow_flag] = single_video_path
+                    speed_prefix = "slow_" if slow_flag else ""
+                    single_video_path = VIDEO_DIR / f"{speed_prefix}{filename_slug(text)}_{uuid.uuid4().hex[:8]}.mp4"
+                    logger.info(f"Generating video with character highlighting (font_size={font_size}, slow={slow_flag})")
+                    create_video_with_text(text, audio_by_speed[slow_flag], single_video_path,
+                                           font_size=font_size, show_qr_code=show_qr_code,
+                                           slow_indicator=slow_flag)
+                    video_by_speed[slow_flag] = single_video_path
 
-            if steps:
+            if dialogue:
+                conv_steps = steps if steps else [SequenceStep(count=repetitions, slow=slow)]
+                # The whole dialogue stays on screen in every clip; each clip
+                # highlights only the line being voiced, located by its
+                # character offset within the joined display text.
+                display_text, line_offsets = dialogue_display_text(dialogue)
+                # slow_flag -> per-line audios/videos/durations, in dialogue order
+                conv_audios = {}
+                conv_videos = {}
+                conv_durations = {}
+                for slow_flag in sorted({s.slow for s in conv_steps}):
+                    conv_audios[slow_flag] = []
+                    conv_videos[slow_flag] = []
+                    conv_durations[slow_flag] = []
+                    for i, line in enumerate(dialogue):
+                        line_voice = voice_b if line.speaker == 1 else voice
+                        logger.info(f"Generating conversation line {i + 1}/{len(dialogue)} (speaker {line.speaker}, slow={slow_flag})")
+                        line_audio, line_duration = tts_service.generate_audio(
+                            line.text, language, slow_flag, engine=engine_enum, voice=line_voice
+                        )
+                        line_audios.append(line_audio)
+                        conv_audios[slow_flag].append(line_audio)
+                        conv_durations[slow_flag].append(line_duration)
+
+                        speed_tag = "s" if slow_flag else "n"
+                        line_video = VIDEO_DIR / f"convline{i}{speed_tag}_{filename_slug(line.text)}_{uuid.uuid4().hex[:8]}.mp4"
+                        create_video_with_text(line.text, line_audio, line_video,
+                                               font_size=font_size, show_qr_code=show_qr_code,
+                                               display_text=display_text,
+                                               text_offset=line_offsets[i],
+                                               text_align="left",
+                                               slow_indicator=slow_flag)
+                        line_videos.append(line_video)
+                        conv_videos[slow_flag].append(line_video)
+
+                seq_part = f"{sequence_slug(steps)}_" if steps else ""
+                base_name = f"conv_{len(dialogue)}lines_{seq_part}{filename_slug(text)}_{uuid.uuid4().hex[:8]}"
+                try:
+                    logger.info(f"Concatenating {len(line_videos)} conversation clips via stream copy")
+                    ordered = [
+                        clip
+                        for st in conv_steps
+                        for _ in range(st.count)
+                        for clip in conv_videos[st.slow]
+                    ]
+                    video_path = concat_copy(ordered, VIDEO_DIR / f"{base_name}.mp4")
+                    duration = sum(
+                        st.count * sum(conv_durations[st.slow]) for st in conv_steps
+                    )
+                    logger.info(f"Conversation video: {video_path.name}")
+                except Exception as concat_error:
+                    logger.warning(f"Conversation concat failed: {concat_error}, using first line's video")
+                    first_speed = conv_steps[0].slow
+                    video_path = conv_videos[first_speed][0]
+                    duration = conv_durations[first_speed][0]
+                if steps:
+                    message = (
+                        f"Conversation video generated ({describe_dialogue(dialogue)}, "
+                        f"sequence {describe_sequence(steps)}, "
+                        f"{total_repetitions(steps)} repetitions)"
+                    )
+                else:
+                    message = (
+                        f"Conversation video generated ({describe_dialogue(dialogue)}, "
+                        f"{repetitions} repetitions)"
+                    )
+
+                # Build the matching audio for the "Download Audio Only" link.
+                try:
+                    ordered_audios = [
+                        clip
+                        for st in conv_steps
+                        for _ in range(st.count)
+                        for clip in conv_audios[st.slow]
+                    ]
+                    audio_path = tts_service.concatenate_audio(
+                        ordered_audios,
+                        f"{base_name}.{tts_service.audio_config['format']}"
+                    )
+                except Exception as audio_concat_error:
+                    logger.warning(f"Conversation audio concat failed: {audio_concat_error}, keeping first line's audio")
+                    audio_path = line_audios[0]
+            elif steps:
                 try:
                     logger.info(f"Concatenating sequence {sequence} via stream copy")
                     ordered = [video_by_speed[s.slow] for s in steps for _ in range(s.count)]
@@ -180,8 +286,10 @@ def convert_to_video(
                 message = "Video generated"
 
             # Remove leftover intermediates not returned to the client:
-            # unused per-speed audios (and timing sidecars) and videos.
-            for leftover in audio_by_speed.values():
+            # unused per-speed/per-line audios (and timing sidecars) and videos.
+            for leftover in list(audio_by_speed.values()) + line_audios:
+                if leftover == audio_path:
+                    continue
                 for path in (leftover, leftover.with_name(leftover.name + ".words.json")):
                     if path.exists():
                         try:
@@ -189,13 +297,15 @@ def convert_to_video(
                         except OSError:
                             pass
             audio_by_speed = {}
-            for leftover in video_by_speed.values():
+            line_audios = []
+            for leftover in list(video_by_speed.values()) + line_videos:
                 if leftover != video_path and leftover.exists():
                     try:
                         leftover.unlink()
                     except OSError:
                         pass
             video_by_speed = {}
+            line_videos = []
 
             logger.info(f"Video generated successfully: {video_path.name}")
 
@@ -212,9 +322,14 @@ def convert_to_video(
         except HTTPException:
             raise
         except Exception as e:
-            cleanup_paths = list(audio_by_speed.values()) + list(video_by_speed.values())
+            cleanup_paths = (
+                list(audio_by_speed.values()) + list(video_by_speed.values())
+                + line_audios + line_videos
+            )
             if video_path:
                 cleanup_paths.append(video_path)
+            if audio_path:
+                cleanup_paths.append(audio_path)
             for path in cleanup_paths:
                 if path.exists():
                     try:
@@ -234,7 +349,9 @@ def generate_preview(
     text: str = Form(...),
     font_size: int = Form(48),
     show_qr_code: bool = Form(False),
-    highlight_position: int = Form(0)
+    highlight_position: int = Form(0),
+    conversation: bool = Form(False),
+    slow: bool = Form(False)
 ):
     """Generate a preview frame showing how the video will look."""
     if not text:
@@ -243,10 +360,23 @@ def generate_preview(
     if font_size < 16 or font_size > 200:
         font_size = 48
 
+    text_align = "center"
+    if conversation:
+        try:
+            dialogue = parse_dialogue(text)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        text, line_offsets = dialogue_display_text(dialogue)
+        text_align = "left"
+        if highlight_position == 0:
+            # Highlight the first voiced character, not the speaker marker
+            highlight_position = line_offsets[0]
+
     try:
         from src.services.video_generation import create_preview_frame
 
-        preview_img = create_preview_frame(text, font_size, show_qr_code, highlight_position)
+        preview_img = create_preview_frame(text, font_size, show_qr_code, highlight_position,
+                                           text_align=text_align, slow_indicator=slow)
 
         buffer = io.BytesIO()
         preview_img.save(buffer, format='PNG')

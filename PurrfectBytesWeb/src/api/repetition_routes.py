@@ -12,6 +12,7 @@ from src.services.video_service import VideoService
 from src.config.settings import VIDEO_DIR
 from src.utils.logger import get_logger, RequestLogger, log_error
 from src.utils.sequence_utils import parse_sequence, describe_sequence, total_repetitions
+from src.utils.dialogue_utils import parse_dialogue, describe_dialogue
 
 language_service = LanguageDetectionService()
 tts_service = TTSService()
@@ -44,17 +45,28 @@ def repeat_audio_endpoint(
     slow: bool = Form(False),
     engine: str = Form("edge"),
     voice: Optional[str] = Form(None),
-    sequence: Optional[str] = Form(None)
+    sequence: Optional[str] = Form(None),
+    conversation: bool = Form(False),
+    voice_b: Optional[str] = Form(None)
 ):
     """Generate audio once per speed and repeat it following the requested pattern.
 
     When `sequence` is provided (e.g. "2n,3s" = 2 normal then 3 slow), it takes
-    precedence over `repetitions` and `slow`.
+    precedence over `repetitions` and `slow`. When `conversation` is set, lines
+    of the text alternate between `voice` and `voice_b`; combined with a
+    sequence, each step plays the whole conversation at that step's speed.
     """
     with RequestLogger(logger, f"audio repetition (engine={engine})"):
         try:
             if not text:
                 raise HTTPException(status_code=400, detail="No text provided")
+
+            dialogue = None
+            if conversation:
+                try:
+                    dialogue = parse_dialogue(text)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
 
             steps = None
             if sequence:
@@ -72,7 +84,28 @@ def repeat_audio_endpoint(
 
             engine_enum = TTSService.parse_engine(engine)
 
-            if steps:
+            if dialogue:
+                audio_path, total_duration = tts_service.generate_conversation(
+                    lines=dialogue,
+                    language=language,
+                    slow=slow,
+                    engine=engine_enum,
+                    voices=(voice, voice_b),
+                    repetitions=repetitions,
+                    steps=steps
+                )
+                if steps:
+                    message = (
+                        f"Conversation audio generated ({describe_dialogue(dialogue)}, "
+                        f"sequence {describe_sequence(steps)}, "
+                        f"{total_repetitions(steps)} repetitions)"
+                    )
+                else:
+                    message = (
+                        f"Conversation audio generated ({describe_dialogue(dialogue)}, "
+                        f"{repetitions} repetitions)"
+                    )
+            elif steps:
                 audio_path, total_duration = tts_service.generate_sequence(
                     text=text,
                     steps=steps,

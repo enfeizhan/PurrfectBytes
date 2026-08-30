@@ -173,6 +173,78 @@ class TestTTSService:
         assert not slow.exists()
         assert not normal_sidecar.exists()
 
+    def test_generate_conversation_alternates_voices_and_cleans_up(self, tts_service, audio_dir, mocker):
+        """Each line uses its speaker's voice; lines concatenate in order × repetitions."""
+        from src.utils.dialogue_utils import parse_dialogue
+
+        line_files = []
+
+        def fake_generate(text, lang, slow_flag, engine=None, voice=None):
+            path = audio_dir / f"line{len(line_files)}.mp3"
+            path.write_bytes(b"x")
+            path.with_name(path.name + ".words.json").write_text("[]")
+            line_files.append(path)
+            return path, 2.0
+
+        generate = mocker.patch.object(tts_service, "generate_audio", side_effect=fake_generate)
+        output = audio_dir / "out.mp3"
+        concat = mocker.patch.object(tts_service, "concatenate_audio", return_value=output)
+
+        dialogue = parse_dialogue("Hello\nHi\nBye")
+        result_path, duration = tts_service.generate_conversation(
+            dialogue, voices=("voiceA", "voiceB"), repetitions=2
+        )
+
+        assert result_path == output
+        assert duration == pytest.approx(3 * 2.0 * 2)
+        # One synthesis per line, with the speaker's voice
+        assert generate.call_count == 3
+        voices_used = [call.args[4] for call in generate.call_args_list]
+        assert voices_used == ["voiceA", "voiceB", "voiceA"]
+        # Concatenation receives the per-line paths repeated in order
+        ordered_paths, output_filename = concat.call_args[0]
+        assert ordered_paths == line_files * 2
+        assert output_filename.startswith("conv_3lines_")
+        # Per-line sources and sidecars are removed
+        for path in line_files:
+            assert not path.exists()
+            assert not path.with_name(path.name + ".words.json").exists()
+
+    def test_generate_conversation_with_sequence(self, tts_service, audio_dir, mocker):
+        """With steps, each line is synthesized per distinct speed and ordered per step."""
+        from src.utils.dialogue_utils import parse_dialogue
+        from src.utils.sequence_utils import parse_sequence
+
+        created = []
+
+        def fake_generate(text, lang, slow_flag, engine=None, voice=None):
+            path = audio_dir / f"{'slow' if slow_flag else 'norm'}_{len(created)}.mp3"
+            path.write_bytes(b"x")
+            created.append(path)
+            return path, 4.0 if slow_flag else 2.0
+
+        generate = mocker.patch.object(tts_service, "generate_audio", side_effect=fake_generate)
+        output = audio_dir / "out.mp3"
+        concat = mocker.patch.object(tts_service, "concatenate_audio", return_value=output)
+
+        dialogue = parse_dialogue("Hello\nHi")
+        steps = parse_sequence("2n,1s")
+        result_path, duration = tts_service.generate_conversation(
+            dialogue, voices=("voiceA", "voiceB"), steps=steps
+        )
+
+        assert result_path == output
+        # 2 normal plays of (2+2)s + 1 slow play of (4+4)s
+        assert duration == pytest.approx(2 * 4.0 + 1 * 8.0)
+        # One synthesis per line per distinct speed
+        assert generate.call_count == 4
+        normal_lines, slow_lines = created[:2], created[2:]
+        ordered_paths, output_filename = concat.call_args[0]
+        assert ordered_paths == normal_lines + normal_lines + slow_lines
+        assert output_filename.startswith("conv_2lines_2n-1s_")
+        for path in created:
+            assert not path.exists()
+
     def test_generate_sequence_single_speed_synthesizes_once(self, tts_service, audio_dir, mocker):
         """An all-normal sequence only synthesizes one audio."""
         from src.utils.sequence_utils import parse_sequence

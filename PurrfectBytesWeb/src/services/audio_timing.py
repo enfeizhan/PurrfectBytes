@@ -148,8 +148,8 @@ def _uniform_timings(
     lead_time: float,
     overlap_duration: float,
 ) -> List[CharacterTiming]:
-    """Spread characters uniformly across the audio duration (spaces count half)."""
-    weights = [0.5 if c == " " else 1.0 for c in text]
+    """Spread characters uniformly across the audio duration (whitespace counts half)."""
+    weights = [0.5 if c.isspace() else 1.0 for c in text]
     total = sum(weights) or 1.0
     rate = total / duration if duration > 0 else 1.0
 

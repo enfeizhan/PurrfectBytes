@@ -78,6 +78,28 @@ class TestTextUtils:
         total_chars = sum(len(line) for line in lines)
         assert total_chars == len(sample_japanese_text)
     
+    def test_wrap_text_honors_newlines(self):
+        """Newlines are hard line breaks; the newline char never becomes a glyph."""
+        img = Image.new('RGB', (800, 600))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
+
+        lines = wrap_text_for_video("こんにちは\n元気ですか", 800, font, draw)
+        assert lines == ["こんにちは", "元気ですか"]
+        assert all("\n" not in line for line in lines)
+
+        lines = wrap_text_for_video("Hello there\nGood bye", 800, font, draw)
+        assert lines == ["Hello there", "Good bye"]
+
+    def test_wrap_text_drops_blank_lines(self):
+        """Blank/whitespace-only lines don't produce empty display lines."""
+        img = Image.new('RGB', (800, 600))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
+
+        lines = wrap_text_for_video("Hello\n\n   \nBye", 800, font, draw)
+        assert lines == ["Hello", "Bye"]
+
     def test_wrap_text_empty_input(self):
         """Test text wrapping with empty input."""
         img = Image.new('RGB', (800, 600))

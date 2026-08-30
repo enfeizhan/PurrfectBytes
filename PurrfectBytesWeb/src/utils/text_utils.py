@@ -14,34 +14,43 @@ def has_cjk_characters(text: str) -> bool:
     return any(is_cjk_character(char) for char in text)
 
 def wrap_text_for_video(
-    text: str, 
-    width: int, 
-    font: ImageFont.ImageFont, 
-    draw: ImageDraw.ImageDraw, 
+    text: str,
+    width: int,
+    font: ImageFont.ImageFont,
+    draw: ImageDraw.ImageDraw,
     padding: int = 50
 ) -> List[str]:
     """
     Wrap text to fit within video width with proper handling for CJK languages.
-    
+
+    Newlines in the text are honored as hard line breaks (blank lines are
+    dropped); each resulting line is then wrapped to the width independently.
+
     Args:
         text: Text to wrap
         width: Video width in pixels
         font: Font to use for measuring
         draw: ImageDraw instance for text measurement
         padding: Padding from edges
-        
+
     Returns:
         List of text lines that fit within the specified width
     """
     if not text:
         return [""]
-    
+
     max_width = width - (padding * 2)
-    
-    if has_cjk_characters(text):
-        return _wrap_cjk_text(text, max_width, font, draw)
-    else:
-        return _wrap_latin_text(text, max_width, font, draw)
+
+    lines: List[str] = []
+    for segment in text.splitlines():
+        segment = segment.strip()
+        if not segment:
+            continue
+        if has_cjk_characters(segment):
+            lines.extend(_wrap_cjk_text(segment, max_width, font, draw))
+        else:
+            lines.extend(_wrap_latin_text(segment, max_width, font, draw))
+    return lines or [""]
 
 def _wrap_cjk_text(
     text: str, 

@@ -204,15 +204,23 @@ def _compute_char_layout(
     draw: ImageDraw.ImageDraw,
     video_width: int,
     video_height: int,
-    line_height: int = 70,
+    line_height: Optional[int] = None,
+    align: str = "center",
 ) -> List[dict]:
     """Precompute position and bounding box for every character.
 
     Glyph metrics don't change between frames, so this runs once per video
-    instead of once per character per frame.
+    instead of once per character per frame. `align` is "center" or "left"
+    (left uses the same 50px padding the wrapping assumes). Line height
+    scales with the font size (70px at the default 48px font).
     """
+    if line_height is None:
+        line_height = round(getattr(font, "size", 48) * 70 / 48)
+
     layout = []
-    y_position = (video_height - len(lines) * line_height) // 2
+    # Center vertically, but never start above the frame: oversized text
+    # should overflow at the bottom, keeping the first lines readable.
+    y_position = max((video_height - len(lines) * line_height) // 2, 10)
 
     for line in lines:
         widths = []
@@ -220,7 +228,10 @@ def _compute_char_layout(
             bbox = draw.textbbox((0, 0), char, font=font)
             widths.append(bbox[2] - bbox[0])
 
-        x_position = (video_width - sum(widths)) // 2
+        if align == "left":
+            x_position = 50
+        else:
+            x_position = (video_width - sum(widths)) // 2
         for char, width in zip(line, widths):
             bbox = draw.textbbox((x_position, y_position), char, font=font)
             layout.append({
@@ -234,6 +245,45 @@ def _compute_char_layout(
         y_position += line_height
 
     return layout
+
+
+def _map_text_positions(text: str, char_layout: List[dict]) -> List[Optional[int]]:
+    """Map each character position in the original text to its layout entry.
+
+    Wrapping drops characters that aren't displayed (newlines, collapsed
+    whitespace), so layout indices drift from text positions. Greedy character
+    matching realigns them; dropped characters map to None.
+    """
+    mapping: List[Optional[int]] = [None] * len(text)
+    j = 0
+    for i, char in enumerate(text):
+        if j < len(char_layout) and char_layout[j]['char'] == char:
+            mapping[i] = j
+            j += 1
+    return mapping
+
+
+def _draw_slow_badge(img: Image.Image) -> None:
+    """Red "SLOW" pill in the top-right corner marking slow-speech playback."""
+    margin = 20
+    font = load_font(28)
+    draw = ImageDraw.Draw(img)
+    label = "SLOW"
+    bbox = draw.textbbox((0, 0), label, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    pad_x, pad_y = 18, 10
+    badge_width = text_width + 2 * pad_x
+    badge_height = text_height + 2 * pad_y
+    x = img.width - margin - badge_width
+    y = margin
+    draw.rounded_rectangle(
+        [x, y, x + badge_width, y + badge_height],
+        radius=badge_height // 2,
+        fill=(220, 50, 50),
+    )
+    draw.text((x + pad_x - bbox[0], y + pad_y - bbox[1]), label, font=font,
+              fill=(255, 255, 255))
 
 
 def _load_assets(show_qr_code: bool = False):
@@ -281,9 +331,23 @@ def create_character_animated_video(
     audio_path,
     output_path,
     font_size: int = 48,
-    show_qr_code: bool = False
+    show_qr_code: bool = False,
+    display_text: Optional[str] = None,
+    text_offset: int = 0,
+    text_align: str = "center",
+    slow_indicator: bool = False
 ):
-    """Create video with character-level highlighting and optional QR code overlay."""
+    """Create video with character-level highlighting and optional QR code overlay.
+
+    `display_text` (default: `text`) is what appears on screen; `text` is what
+    the audio voices. When the voiced text is a slice of the displayed text
+    (conversation mode shows the whole dialogue while one line plays),
+    `text_offset` is the voiced text's character offset within `display_text`.
+    `slow_indicator` overlays a "SLOW" badge for slow-speech clips.
+    """
+    if display_text is None:
+        display_text = text
+
     audio = AudioFileClip(str(audio_path))
     duration = audio.duration
 
@@ -294,15 +358,17 @@ def create_character_animated_video(
     fps = 24
     bg_color = (30, 30, 40)
 
-    font = load_font(font_size, text=text)
+    font = load_font(font_size, text=display_text)
 
     background_img, qr_code_img, cat_logo, qr_size, qr_margin, qr_opacity, cat_size = _load_assets(show_qr_code)
 
     dummy_img = Image.new('RGB', (video_width, video_height))
     dummy_draw = ImageDraw.Draw(dummy_img)
-    lines = wrap_text_for_video(text, video_width, font, dummy_draw)
+    lines = wrap_text_for_video(display_text, video_width, font, dummy_draw)
 
-    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height)
+    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height,
+                                       align=text_align)
+    position_map = _map_text_positions(display_text, char_layout)
 
     # Static base frame: background, all characters in inactive color, QR code.
     # Per frame we only overlay the currently highlighted characters — the
@@ -324,6 +390,9 @@ def create_character_animated_video(
         qr_with_opacity.putalpha(alpha)
         base_img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
 
+    if slow_indicator:
+        _draw_slow_badge(base_img)
+
     def make_frame(t):
         img = base_img.copy()
         draw = ImageDraw.Draw(img)
@@ -334,10 +403,10 @@ def create_character_animated_video(
         for timing in char_timings:
             if not (timing['start_time'] <= t <= timing['end_time']):
                 continue
-            position = timing['position']
-            if position >= len(char_layout):
+            position = timing['position'] + text_offset
+            if position >= len(position_map) or position_map[position] is None:
                 continue
-            entry = char_layout[position]
+            entry = char_layout[position_map[position]]
             bbox = entry['bbox']
 
             draw.rectangle([bbox[0] - 4, bbox[1] - 4, bbox[2] + 4, bbox[3] + 4],
@@ -384,12 +453,18 @@ def create_video_with_text(
     output_path,
     duration=None,
     font_size: int = 48,
-    show_qr_code: bool = False
+    show_qr_code: bool = False,
+    display_text: Optional[str] = None,
+    text_offset: int = 0,
+    text_align: str = "center",
+    slow_indicator: bool = False
 ):
     """Main function to create video with character-level text highlighting and optional QR code."""
     return create_character_animated_video(
         text, audio_path, output_path,
-        font_size=font_size, show_qr_code=show_qr_code
+        font_size=font_size, show_qr_code=show_qr_code,
+        display_text=display_text, text_offset=text_offset,
+        text_align=text_align, slow_indicator=slow_indicator
     )
 
 
@@ -397,7 +472,9 @@ def create_preview_frame(
     text: str,
     font_size: int = 48,
     show_qr_code: bool = False,
-    highlight_position: int = 0
+    highlight_position: int = 0,
+    text_align: str = "center",
+    slow_indicator: bool = False
 ) -> Image.Image:
     """Generate a single preview frame showing how the video will look."""
     video_width = 1280
@@ -418,7 +495,8 @@ def create_preview_frame(
     dummy_draw = ImageDraw.Draw(dummy_img)
     lines = wrap_text_for_video(text, video_width, font, dummy_draw)
 
-    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height)
+    char_layout = _compute_char_layout(lines, font, dummy_draw, video_width, video_height,
+                                       align=text_align)
 
     cat_x = None
     cat_y = None
@@ -456,5 +534,8 @@ def create_preview_frame(
         alpha = alpha.point(lambda p: int(p * qr_opacity))
         qr_with_opacity.putalpha(alpha)
         img.paste(qr_with_opacity, (qr_x, qr_y), qr_with_opacity)
+
+    if slow_indicator:
+        _draw_slow_badge(img)
 
     return img

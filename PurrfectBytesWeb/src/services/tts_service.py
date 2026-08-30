@@ -431,6 +431,97 @@ class TTSService:
                         except OSError:
                             pass
 
+    def generate_conversation(
+        self,
+        lines: List["DialogueLine"],
+        language: str = "en",
+        slow: bool = False,
+        engine: Optional[TTSEngine] = None,
+        voices: Tuple[Optional[str], Optional[str]] = (None, None),
+        repetitions: int = 1,
+        steps: Optional[List["SequenceStep"]] = None
+    ) -> Tuple[Path, float]:
+        """
+        Generate two-voice conversation audio: each line is synthesized with its
+        speaker's voice, then all lines are concatenated in order, repeating the
+        whole conversation per the requested pattern.
+
+        Args:
+            lines: Ordered DialogueLines (text + speaker 0/1 per line)
+            language: Language code for TTS (shared by both speakers)
+            slow: Whether to use slow speech speed (ignored when steps is given)
+            engine: TTS engine to use (defaults to self.default_engine)
+            voices: (speaker 0 voice, speaker 1 voice); None uses the engine default
+            repetitions: How many times to repeat the whole conversation
+                         (ignored when steps is given)
+            steps: Optional speed sequence; each step plays the whole
+                   conversation `count` times at that step's speed
+
+        Returns:
+            Tuple of (concatenated_file_path, total_duration)
+
+        Raises:
+            Exception: If generation or concatenation fails
+        """
+        from src.utils.sequence_utils import SequenceStep, sequence_slug
+
+        if not lines:
+            raise ValueError("Conversation must contain at least one line")
+
+        explicit_sequence = steps is not None
+        if not explicit_sequence:
+            steps = [SequenceStep(count=repetitions, slow=slow)]
+
+        # slow_flag -> per-line paths / durations, in dialogue order
+        audio_by_speed: dict = {}
+        duration_by_speed: dict = {}
+
+        try:
+            for slow_flag in sorted({step.slow for step in steps}):
+                paths: List[Path] = []
+                durations: List[float] = []
+                for line in lines:
+                    audio_path, duration = self.generate_audio(
+                        line.text, language, slow_flag, engine, voices[line.speaker]
+                    )
+                    paths.append(audio_path)
+                    durations.append(duration)
+                audio_by_speed[slow_flag] = paths
+                duration_by_speed[slow_flag] = durations
+
+            ordered_paths = [
+                path
+                for step in steps
+                for _ in range(step.count)
+                for path in audio_by_speed[step.slow]
+            ]
+            seq_part = f"{sequence_slug(steps)}_" if explicit_sequence else ""
+            output_filename = (
+                f"conv_{len(lines)}lines_{seq_part}{filename_slug(lines[0].text)}"
+                f"_{uuid.uuid4().hex[:8]}.{self.audio_config['format']}"
+            )
+            output_path = self.concatenate_audio(ordered_paths, output_filename)
+
+            total_duration = sum(
+                step.count * sum(duration_by_speed[step.slow]) for step in steps
+            )
+            return output_path, total_duration
+
+        except Exception as e:
+            raise Exception(f"Failed to generate conversation audio: {str(e)}")
+
+        finally:
+            # The per-line sources are intermediate; remove them and their
+            # word-timing sidecars regardless of outcome.
+            for source_paths in audio_by_speed.values():
+                for source_path in source_paths:
+                    for path in (source_path, source_path.with_name(source_path.name + ".words.json")):
+                        if path.exists():
+                            try:
+                                path.unlink()
+                            except OSError:
+                                pass
+
     def get_available_engines(self) -> List[dict]:
         """
         Get list of available TTS engines.
