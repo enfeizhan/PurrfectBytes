@@ -94,3 +94,6 @@ PurrfectBytesAndroid/app/*.iml
 *client_secrets.json
 *youtube_token.json
 .env
+
+# Personal data
+saved_sources.json

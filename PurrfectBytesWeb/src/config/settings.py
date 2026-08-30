@@ -50,6 +50,12 @@ YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube",
 ]
 
+# Saved text sources (for YouTube description credit lines)
+SAVED_SOURCES_FILE = os.getenv(
+    "SAVED_SOURCES_FILE",
+    str(BASE_DIR / "saved_sources.json")
+)
+
 # Video generation settings
 VIDEO_CONFIG = {
     "width": 1280,
@@ -170,6 +176,7 @@ def get_config() -> Dict[str, Any]:
         "templates_dir": TEMPLATES_DIR,
         "assets_dir": ASSETS_DIR,
         "server": {"host": SERVER_HOST, "port": SERVER_PORT, "debug": DEBUG},
+        "saved_sources_file": SAVED_SOURCES_FILE,
         "video": VIDEO_CONFIG,
         "audio": AUDIO_CONFIG,
         "fonts": FONT_CONFIG,

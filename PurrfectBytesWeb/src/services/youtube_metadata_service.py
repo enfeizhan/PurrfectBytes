@@ -1,5 +1,9 @@
 """YouTube metadata generation service with multi-LLM provider support."""
 
+import json
+
+from typing import List, Optional
+
 from src.config.settings import GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
 from src.utils.logger import get_logger
 
@@ -29,9 +33,19 @@ MANDATORY FORMATTING for Breakdowns/Grammar: You must start with the [Original S
 
 Example for English Breakdown: *Word* (IPA Phonetics) = English Meaning.
 
-Break down the sentence (explanations in English). Be SELECTIVE, not exhaustive — this is not a word-by-word gloss. Include only vocabulary, collocations, set phrases, and idioms that an intermediate learner of the target language would plausibly not know. NEVER include beginner-level items (everyday nouns, pronouns, numbers, greetings, basic function words, the most common verbs), no matter how difficult the rest of the sentence is. Prefer meaningful multi-word chunks over splitting them into their parts: when a phrase's meaning or usage is not obvious from its individual words, list the whole phrase as one item rather than each word separately. List items in the order they appear in the sentence. Where useful, append a short nuance note after the meaning (register, formality, common pairings).
+Break down the sentence (explanations in English). Be SELECTIVE, not exhaustive — this is not a word-by-word gloss. Include vocabulary, collocations, set phrases, and idioms that an intermediate learner of the target language would plausibly not know. Set the bar by frequency: exclude a candidate only when it ranks among roughly the 500 most frequent words of the target language (numbers, pronouns, greetings, everyday nouns, basic function words, the most elementary verbs). Everything less frequent than that belongs in the breakdown — including mid-frequency verbs, adverbs, and set adverbial phrases that an intermediate learner recognizes but could not confidently produce. Do not skip such an item just because its meaning looks plain once translated. Note that a multi-word phrase is judged as a unit: it can deserve an entry even when each word in it is common.
 
-Highlight 2-4 key grammar points (explanations in English). Grammar Points and Breakdown must not overlap: purely grammatical machinery (particles, conjugations and verb forms, tense/aspect/mood markers, conditionals, sentence endings, connectors, agreement patterns — whatever the target language uses) goes ONLY under Grammar Points, never in Breakdown; content vocabulary and lexical chunks go under Breakdown. Do not drop an item just because it could fit either section.
+Give verbs and adjectives in their dictionary/base form, not the inflected form used in the sentence — the inflection itself belongs under Grammar Points.
+
+COVER ALL WORD TYPES, not just the visually complex ones: verbs, adjectives, adverbs, and adverbial phrases deserve entries just as much as compound nouns and technical terms. A sentence whose breakdown contains only nouns has almost certainly missed something.
+
+When a content word is fused with a grammar pattern, list BOTH: the content word in its dictionary form under Breakdown, and the pattern under Grammar Points. Explaining the pattern NEVER excuses omitting the word it attaches to. This applies only to words carrying independent lexical meaning — if a word's whole role in the sentence is to build a pattern already covered under Grammar Points (auxiliaries, light or helper verbs, helper adjectives, copulas), leave it out of Breakdown entirely.
+
+Prefer meaningful multi-word chunks over splitting them into their parts: when a phrase's meaning or usage is not obvious from its individual words, list the whole phrase as one item rather than each word separately. List items in the order they appear in the sentence. Where useful, append a short nuance note after the meaning (register, formality, common pairings).
+
+Highlight 2-4 key grammar points (explanations in English). Sort by type: purely grammatical machinery (particles, conjugations and verb forms, tense/aspect/mood markers, conditionals, sentence endings, connectors, agreement patterns — whatever the target language uses) goes under Grammar Points and NEVER under Breakdown; content vocabulary and lexical chunks go under Breakdown. Never print the same item in both sections — but a content word and a pattern attached to it are two different items, so covering the pattern does not remove the word from Breakdown. Do not drop an item just because it could fit either section. Watch especially for patterns in which an ordinary noun, verb, or preposition carries an abstract structural meaning (equivalents of "in the course of", "as far as", "on the grounds that"): they look like plain vocabulary and are the easiest points to overlook.
+
+COVERAGE CHECK before you output: re-read the sentence from beginning to end and confirm that every word or phrase above beginner level appears in one of the two sections. Add anything you skipped.
 
 Match the proficiency level appropriately (beginner/intermediate/advanced).
 
@@ -104,18 +118,50 @@ Final Output Check: Ensure the last sentence of the response is not a question.
 TARGET SENTENCE: {sentence}"""
 
 
+EXTRACTION_PROMPT_TEMPLATE = """You are a language-learning content assistant. Analyze the target sentence and extract every vocabulary item and grammar point a learner of that language might want explained. The user will review your list and untick unwanted entries, so LEAN INCLUSIVE: a missed item cannot be added back, but an extra item costs nothing. When unsure whether something is worth explaining, include it.
+
+RULES:
+
+Identify the language automatically. ALL meanings and explanations MUST be written in English.
+
+Vocabulary items ("kind": "vocabulary"): content words, collocations, set phrases, and idioms. Give verbs and adjectives in their dictionary/base form, not the inflected form used in the sentence. Cover ALL word types - verbs, adjectives, adverbs, and adverbial phrases deserve entries just as much as nouns. Prefer meaningful multi-word chunks over splitting them into their parts: when a phrase's meaning or usage is not obvious from its individual words, list the whole phrase as one item.
+
+Grammar points ("kind": "grammar"): purely grammatical machinery - particles, conjugations and verb forms, tense/aspect/mood markers, conditionals, sentence endings, connectors, agreement patterns, whatever the target language uses. Watch especially for patterns in which an ordinary noun, verb, or preposition carries an abstract structural meaning (equivalents of "in the course of", "as far as", "on the grounds that"): they look like plain vocabulary and are the easiest points to overlook.
+
+When a content word is fused with a grammar pattern, list BOTH: the content word in its dictionary form as vocabulary, and the pattern as grammar. But if a word's whole role in the sentence is to build a pattern already listed as grammar (auxiliaries, light or helper verbs, helper adjectives, copulas), list only the pattern.
+
+Never list the same item as both kinds.
+
+List items in the order they appear in the sentence.
+
+Provide accurate phonetics per language (Japanese always Hiragana - never Romaji, Korean Romanization, Chinese Pinyin, English IPA, etc.); use an empty string when not applicable.
+
+OUTPUT FORMAT: Respond with a strict JSON array and NOTHING else - no prose, no markdown fences, no trailing commentary:
+
+[{{"kind": "vocabulary", "term": "original script", "phonetics": "phonetics", "meaning": "meaning or explanation in English"}}, {{"kind": "grammar", "term": "original script", "phonetics": "phonetics", "meaning": "explanation in English"}}]
+
+TARGET SENTENCE: {sentence}"""
+
+
 class YouTubeMetadataService:
     """Service for generating YouTube titles and descriptions using LLMs."""
 
     AVAILABLE_PROVIDERS = ["gemini", "openai", "anthropic"]
 
-    def generate(self, sentence: str, provider: str = "gemini") -> dict:
+    def generate(self, sentence: str, provider: str = "gemini",
+                 credit: Optional[str] = None,
+                 items: Optional[List[dict]] = None) -> dict:
         """
         Generate YouTube title and description for a language learning video.
 
         Args:
             sentence: The target sentence to generate metadata for
             provider: LLM provider to use (gemini, openai, anthropic)
+            credit: Exact credit sentence to place in the 📌 Credit section
+                    (replaces the generic credit line verbatim)
+            items: User-approved vocabulary/grammar items (from extract_items,
+                   after review). When given, the Breakdown and Grammar Points
+                   sections are constrained to exactly these items.
 
         Returns:
             dict with 'title' and 'description' keys
@@ -128,6 +174,17 @@ class YouTubeMetadataService:
             raise ValueError(f"Unknown provider: {provider}. Available: {', '.join(self.AVAILABLE_PROVIDERS)}")
 
         prompt = YOUTUBE_PROMPT_TEMPLATE.format(sentence=sentence.strip())
+        if items is not None:
+            # Inject the approved-items constraint just before the target
+            # sentence so it overrides the selection rules above it.
+            marker = "TARGET SENTENCE:"
+            marker_pos = prompt.rfind(marker)
+            prompt = (
+                prompt[:marker_pos]
+                + self._items_override_block(items)
+                + "\n\n"
+                + prompt[marker_pos:]
+            )
 
         logger.info(f"Generating YouTube metadata with {provider} for: {sentence[:50]}...")
 
@@ -140,7 +197,128 @@ class YouTubeMetadataService:
         else:
             raise ValueError(f"Provider {provider} not implemented")
 
-        return self._parse_response(raw_text, sentence.strip())
+        result = self._parse_response(raw_text, sentence.strip())
+        if credit:
+            result["description"] = self._apply_credit(result["description"], credit)
+        return result
+
+    def extract_items(self, sentence: str, provider: str = "gemini") -> List[dict]:
+        """
+        Extract candidate vocabulary/grammar items from a sentence for review.
+
+        Returns a list of {"kind": "vocabulary"|"grammar", "term", "phonetics",
+        "meaning"} dicts in sentence order. Deliberately over-inclusive - the
+        user unticks unwanted entries before generation.
+        """
+        if not sentence or not sentence.strip():
+            raise ValueError("No sentence provided")
+
+        provider = provider.lower()
+        if provider not in self.AVAILABLE_PROVIDERS:
+            raise ValueError(f"Unknown provider: {provider}. Available: {', '.join(self.AVAILABLE_PROVIDERS)}")
+
+        prompt = EXTRACTION_PROMPT_TEMPLATE.format(sentence=sentence.strip())
+
+        logger.info(f"Extracting vocabulary/grammar with {provider} for: {sentence[:50]}...")
+
+        if provider == "gemini":
+            raw_text = self._generate_gemini(prompt)
+        elif provider == "openai":
+            raw_text = self._generate_openai(prompt)
+        else:
+            raw_text = self._generate_anthropic(prompt)
+
+        return self._parse_items_response(raw_text)
+
+    @staticmethod
+    def _parse_items_response(raw_text: str) -> List[dict]:
+        """
+        Parse the extraction call's JSON array, tolerating fences and prose.
+
+        Slicing from the first "[" to the last "]" strips markdown fences and
+        any surrounding commentary. Malformed entries are skipped; an unusable
+        response raises ValueError with a user-facing message.
+        """
+        text = (raw_text or "").strip()
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end <= start:
+            raise ValueError("Could not extract items - the AI response had no item list")
+
+        try:
+            data = json.loads(text[start:end + 1])
+        except ValueError:
+            raise ValueError("Could not extract items - the AI response was not valid JSON")
+
+        items = []
+        for entry in data if isinstance(data, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            term = str(entry.get("term", "")).strip()
+            meaning = str(entry.get("meaning", "")).strip()
+            if not term or not meaning:
+                continue
+            kind = str(entry.get("kind", "")).strip().lower()
+            items.append({
+                "kind": kind if kind == "grammar" else "vocabulary",
+                "term": term,
+                "phonetics": str(entry.get("phonetics", "") or "").strip(),
+                "meaning": meaning,
+            })
+
+        if not items:
+            raise ValueError("Could not extract items - try again or use a different provider")
+        return items
+
+    @staticmethod
+    def _items_override_block(items: List[dict]) -> str:
+        """Prompt block constraining the two sections to user-approved items."""
+        def bullets(kind: str) -> str:
+            lines = []
+            for item in items:
+                if item.get("kind") != kind:
+                    continue
+                phonetics = item.get("phonetics", "")
+                phonetics_part = f" ({phonetics})" if phonetics else ""
+                lines.append(f"- {item['term']}{phonetics_part}: {item['meaning']}")
+            return "\n".join(lines) or "(none - output this section's header with no bullet items)"
+
+        return (
+            "APPROVED ITEMS OVERRIDE: The user has hand-picked the items below after "
+            "reviewing an extraction pass. The Breakdown section must contain exactly the "
+            "approved vocabulary items and the Grammar Points section exactly the approved "
+            "grammar items - every listed item, in the given order, with no additions and "
+            "no omissions. This overrides the selection rules above (frequency bar, "
+            "selectivity, the 2-4 grammar points guideline, and the coverage check). All "
+            "formatting rules still apply; you may polish the phonetics and the wording of "
+            "meanings and explanations, but never change which items appear.\n\n"
+            "Approved vocabulary items:\n" + bullets("vocabulary") + "\n\n"
+            "Approved grammar items:\n" + bullets("grammar")
+        )
+
+    @staticmethod
+    def _apply_credit(description: str, credit: str) -> str:
+        """
+        Replace the generic 📌 Credit paragraph with the given sentence, verbatim.
+
+        Uses plain string slicing between the "📌 Credit:" header and the "👍"
+        line so user-written credit text needs no escaping. If either marker is
+        missing from the LLM output, the credit is appended as its own section.
+        """
+        credit = credit.strip()
+        header = "📌 Credit:"
+        header_pos = description.find(header)
+        if header_pos != -1:
+            tail_pos = description.find("👍", header_pos)
+            if tail_pos != -1:
+                return (
+                    description[:header_pos + len(header)]
+                    + f"\n\n{credit}\n\n"
+                    + description[tail_pos:]
+                )
+
+        logger.warning("Credit section markers not found; appending credit section")
+        return f"{description.rstrip()}\n\n{header}\n\n{credit}"
 
     def get_available_providers(self) -> list[dict]:
         """Return list of available providers and their status."""
