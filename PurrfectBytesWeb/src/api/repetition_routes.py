@@ -12,7 +12,7 @@ from src.services.video_service import VideoService
 from src.config.settings import VIDEO_DIR
 from src.utils.logger import get_logger, RequestLogger, log_error
 from src.utils.sequence_utils import parse_sequence, describe_sequence, total_repetitions
-from src.utils.dialogue_utils import parse_dialogue, describe_dialogue
+from src.utils.dialogue_utils import parse_dialogue, parse_voiced_dialogue, describe_dialogue
 
 language_service = LanguageDetectionService()
 tts_service = TTSService()
@@ -47,7 +47,8 @@ def repeat_audio_endpoint(
     voice: Optional[str] = Form(None),
     sequence: Optional[str] = Form(None),
     conversation: bool = Form(False),
-    voice_b: Optional[str] = Form(None)
+    voice_b: Optional[str] = Form(None),
+    voiced_text: Optional[str] = Form(None)
 ):
     """Generate audio once per speed and repeat it following the requested pattern.
 
@@ -55,16 +56,22 @@ def repeat_audio_endpoint(
     precedence over `repetitions` and `slow`. When `conversation` is set, lines
     of the text alternate between `voice` and `voice_b`; combined with a
     sequence, each step plays the whole conversation at that step's speed.
+    `voiced_text`, when provided, is spoken instead of `text` (pronunciation
+    override); in conversation mode it must have the same number of lines.
     """
     with RequestLogger(logger, f"audio repetition (engine={engine})"):
         try:
             if not text:
                 raise HTTPException(status_code=400, detail="No text provided")
 
+            speech_override = voiced_text.strip() if voiced_text and voiced_text.strip() else None
+
             dialogue = None
             if conversation:
                 try:
                     dialogue = parse_dialogue(text)
+                    if speech_override:
+                        dialogue = parse_voiced_dialogue(dialogue, speech_override)
                 except ValueError as e:
                     raise HTTPException(status_code=400, detail=str(e))
 
@@ -107,7 +114,7 @@ def repeat_audio_endpoint(
                     )
             elif steps:
                 audio_path, total_duration = tts_service.generate_sequence(
-                    text=text,
+                    text=speech_override or text,
                     steps=steps,
                     language=language,
                     engine=engine_enum,
@@ -119,7 +126,7 @@ def repeat_audio_endpoint(
                 )
             else:
                 audio_path, total_duration = tts_service.generate_and_repeat(
-                    text=text,
+                    text=speech_override or text,
                     repetitions=repetitions,
                     language=language,
                     slow=slow,

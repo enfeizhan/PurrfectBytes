@@ -27,6 +27,7 @@ from src.utils.sequence_utils import (
 )
 from src.utils.dialogue_utils import (
     parse_dialogue,
+    parse_voiced_dialogue,
     describe_dialogue,
     dialogue_display_text,
 )
@@ -45,9 +46,14 @@ def convert_to_audio(
     language: str = Form("en"),
     slow: bool = Form(False),
     engine: str = Form("edge"),
-    voice: Optional[str] = Form(None)
+    voice: Optional[str] = Form(None),
+    voiced_text: Optional[str] = Form(None)
 ):
-    """Convert text to audio using the specified TTS engine."""
+    """Convert text to audio using the specified TTS engine.
+
+    `voiced_text`, when provided, is spoken instead of `text` — a pronunciation
+    override for words the TTS engine misreads (e.g. kanji respelled in kana).
+    """
     with RequestLogger(logger, f"audio conversion ({language}, engine={engine})"):
         try:
             if not language_service.is_supported_language(language):
@@ -56,8 +62,9 @@ def convert_to_audio(
 
             engine_enum = TTSService.parse_engine(engine)
 
+            speech_text = voiced_text.strip() if voiced_text and voiced_text.strip() else text
             audio_path, duration = tts_service.generate_audio(
-                text, language, slow, engine=engine_enum, voice=voice
+                speech_text, language, slow, engine=engine_enum, voice=voice
             )
 
             return ConversionResult(
@@ -87,7 +94,8 @@ def convert_to_video(
     voice: Optional[str] = Form(None),
     sequence: Optional[str] = Form(None),
     conversation: bool = Form(False),
-    voice_b: Optional[str] = Form(None)
+    voice_b: Optional[str] = Form(None),
+    voiced_text: Optional[str] = Form(None)
 ):
     """Convert text to video with synchronized highlighting using the specified TTS engine.
 
@@ -96,6 +104,13 @@ def convert_to_video(
     of the text alternate between `voice` and `voice_b`, each rendered as its
     own clip and concatenated; combined with a sequence, each step plays the
     whole conversation at that step's speed.
+
+    `voiced_text`, when provided, is spoken instead of `text` while the video
+    still displays `text` — a pronunciation override for words the TTS engine
+    misreads. Highlight timing maps the audio's word boundaries back onto the
+    displayed text where the words still match, bridging respelled words (and
+    falling back to uniform spacing when most of the text was respelled). In
+    conversation mode the override must have the same number of lines.
     """
     with RequestLogger(logger, f"video conversion ({language}, font_size={font_size}, engine={engine}, reps={repetitions}, seq={sequence}, conv={conversation})"):
         audio_by_speed = {}
@@ -106,10 +121,15 @@ def convert_to_video(
         audio_path = None
 
         try:
+            speech_override = voiced_text.strip() if voiced_text and voiced_text.strip() else None
+
             dialogue = None
+            voiced_dialogue = None
             if conversation:
                 try:
                     dialogue = parse_dialogue(text)
+                    if speech_override:
+                        voiced_dialogue = parse_voiced_dialogue(dialogue, speech_override)
                 except ValueError as e:
                     raise HTTPException(status_code=400, detail=str(e))
 
@@ -146,7 +166,8 @@ def convert_to_video(
                 for slow_flag in sorted({s.slow for s in steps} if steps else {slow}):
                     logger.info(f"Generating audio for video with engine={engine} (slow={slow_flag})")
                     audio_by_speed[slow_flag], duration_by_speed[slow_flag] = tts_service.generate_audio(
-                        text, language, slow_flag, engine=engine_enum, voice=voice
+                        speech_override or text, language, slow_flag,
+                        engine=engine_enum, voice=voice
                     )
 
                     speed_prefix = "slow_" if slow_flag else ""
@@ -173,9 +194,10 @@ def convert_to_video(
                     conv_durations[slow_flag] = []
                     for i, line in enumerate(dialogue):
                         line_voice = voice_b if line.speaker == 1 else voice
+                        voiced_line = voiced_dialogue[i].text if voiced_dialogue else line.text
                         logger.info(f"Generating conversation line {i + 1}/{len(dialogue)} (speaker {line.speaker}, slow={slow_flag})")
                         line_audio, line_duration = tts_service.generate_audio(
-                            line.text, language, slow_flag, engine=engine_enum, voice=line_voice
+                            voiced_line, language, slow_flag, engine=engine_enum, voice=line_voice
                         )
                         line_audios.append(line_audio)
                         conv_audios[slow_flag].append(line_audio)

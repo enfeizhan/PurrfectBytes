@@ -273,6 +273,83 @@ class TestAPIEndpoints:
         assert data["video_filename"].startswith("conv_2lines_1n-1s_")
         assert "sequence 1 normal, 1 slow" in data["message"]
 
+    def test_convert_voices_the_override_text(self, client, mocker, temp_dir):
+        """A pronunciation override is what the TTS engine actually speaks."""
+        from src.api import conversion_routes
+        fake_audio = temp_dir / "fake.mp3"
+        fake_audio.write_bytes(b"")
+        generate = mocker.patch.object(
+            conversion_routes.tts_service, "generate_audio",
+            return_value=(fake_audio, 1.0),
+        )
+
+        response = client.post("/convert", data={
+            "text": "昨日行った",
+            "language": "ja",
+            "voiced_text": "きのう おこなった"
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert generate.call_args.args[0] == "きのう おこなった"
+
+    def test_convert_to_video_voices_override_but_displays_text(self, client, mocker, temp_dir):
+        """Video speaks the override while rendering/timing the original text."""
+        from src.api import conversion_routes
+        fake_audio = temp_dir / "fake.mp3"
+        fake_audio.write_bytes(b"")
+        generate = mocker.patch.object(
+            conversion_routes.tts_service, "generate_audio",
+            return_value=(fake_audio, 1.0),
+        )
+        render = mocker.patch("src.services.video_generation.create_video_with_text")
+
+        response = client.post("/convert-to-video", data={
+            "text": "昨日行った",
+            "language": "ja",
+            "repetitions": "1",
+            "voiced_text": "きのうおこなった"
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert generate.call_args.args[0] == "きのうおこなった"
+        assert render.call_args.args[0] == "昨日行った"
+
+    def test_repeat_audio_conversation_voices_override_lines(self, client, mocker, temp_dir):
+        """In conversation mode the override lines are voiced with the original speakers."""
+        from src.api import repetition_routes
+        fake_audio = temp_dir / "conv.mp3"
+        fake_audio.write_bytes(b"")
+        generate = mocker.patch.object(
+            repetition_routes.tts_service, "generate_conversation",
+            return_value=(fake_audio, 2.0),
+        )
+
+        response = client.post("/repeat-audio", data={
+            "text": "行った\n売った",
+            "conversation": "true",
+            "repetitions": "1",
+            "voiced_text": "おこなった\nうった"
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        lines = generate.call_args.kwargs["lines"]
+        assert [line.text for line in lines] == ["おこなった", "うった"]
+        assert [line.speaker for line in lines] == [0, 1]
+
+    def test_conversation_voiced_override_line_mismatch_rejected(self, client):
+        """A conversation override with a different line count is a 400."""
+        for endpoint in ("/repeat-audio", "/convert-to-video"):
+            response = client.post(endpoint, data={
+                "text": "Hello\nHi",
+                "conversation": "true",
+                "voiced_text": "Only one line"
+            })
+            assert response.status_code == 400
+            assert "same number of lines" in response.json()["detail"]
+
     def test_sources_crud_round_trip(self, client, temp_dir, monkeypatch):
         """Saved text sources can be created, listed, and deleted."""
         monkeypatch.setattr(

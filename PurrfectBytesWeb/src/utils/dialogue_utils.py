@@ -40,6 +40,31 @@ def parse_dialogue(text: str) -> List[DialogueLine]:
     ]
 
 
+def parse_voiced_dialogue(
+    display_lines: List[DialogueLine], voiced_text: str
+) -> List[DialogueLine]:
+    """
+    Parse a pronunciation-override text against an already-parsed dialogue.
+
+    Each non-empty line of `voiced_text` is voiced in place of the matching
+    display line, keeping its speaker. Raises ValueError with a user-facing
+    message when the line counts differ.
+    """
+    stripped = [line.strip() for line in (voiced_text or "").splitlines()]
+    lines = [line for line in stripped if line]
+
+    if len(lines) != len(display_lines):
+        raise ValueError(
+            f"Pronunciation override must have the same number of lines as the "
+            f"text ({len(display_lines)}), got {len(lines)}"
+        )
+
+    return [
+        DialogueLine(text=line, speaker=display.speaker)
+        for line, display in zip(lines, display_lines)
+    ]
+
+
 def describe_dialogue(lines: List[DialogueLine]) -> str:
     """Human-readable form: "6 lines, 2 voices"."""
     return f"{len(lines)} lines, 2 voices"
