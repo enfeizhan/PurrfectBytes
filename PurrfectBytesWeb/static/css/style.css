@@ -367,6 +367,26 @@ button.loading .spinner {
     border: 1px solid #e0e5f0;
 }
 
+/* The generated title/description are editable form fields */
+input.metadata-content,
+textarea.metadata-content {
+    display: block;
+    width: 100%;
+    font-family: inherit;
+    transition: border-color 0.3s;
+}
+
+input.metadata-content:focus,
+textarea.metadata-content:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+textarea.description-content {
+    min-height: 300px;
+    resize: vertical;
+}
+
 .title-content {
     font-size: 16px;
     font-weight: 500;

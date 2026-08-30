@@ -18,6 +18,23 @@
                 <textarea id="text" name="text" placeholder="Type or paste your text here..." required></textarea>
             </div>
 
+            <div class="checkbox-group">
+                <input type="checkbox" id="voicedToggle">
+                <label for="voicedToggle">Pronunciation override (voice a different text)</label>
+            </div>
+
+            <div id="voicedOptions" class="form-group" style="display: none;">
+                <label for="voicedText">Text to voice instead:</label>
+                <textarea id="voicedText"
+                    placeholder="Copy the text above and respell the misread words phonetically, e.g. 行った → おこなった"></textarea>
+                <small class="hint">
+                    The TTS speaks this text while the video still displays the text above —
+                    use it when the engine misreads a word. Highlighting stays synchronized
+                    for the words that are unchanged. In conversation mode, keep the same
+                    number of lines.
+                </small>
+            </div>
+
             <div class="form-group">
                 <label for="language">Language:</label>
                 <div class="field-row">
@@ -220,17 +237,18 @@
             <div id="metadataResult" class="metadata-card" style="display: none;">
                 <div class="metadata-field">
                     <div class="metadata-header">
-                        <label>Title:</label>
+                        <label for="metadataTitle">Title:</label>
                         <button type="button" class="copy-btn" data-copy-target="metadataTitle">📋 Copy</button>
                     </div>
-                    <div id="metadataTitle" class="metadata-content title-content"></div>
+                    <input type="text" id="metadataTitle" class="metadata-content title-content" maxlength="100">
+                    <small class="hint"><span id="titleCharCount">0</span>/100 characters — edit freely before copying or uploading</small>
                 </div>
                 <div class="metadata-field">
                     <div class="metadata-header">
-                        <label>Description:</label>
+                        <label for="metadataDescription">Description:</label>
                         <button type="button" class="copy-btn" data-copy-target="metadataDescription">📋 Copy</button>
                     </div>
-                    <pre id="metadataDescription" class="metadata-content description-content"></pre>
+                    <textarea id="metadataDescription" class="metadata-content description-content" rows="14"></textarea>
                 </div>
             </div>
         </div>

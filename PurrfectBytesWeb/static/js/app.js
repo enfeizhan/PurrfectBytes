@@ -13,6 +13,9 @@ const voiceSelect = document.getElementById('voiceSelect');
 const voiceSelectB = document.getElementById('voiceSelectB');
 const conversationToggle = document.getElementById('conversationToggle');
 const conversationOptions = document.getElementById('conversationOptions');
+const voicedToggle = document.getElementById('voicedToggle');
+const voicedOptions = document.getElementById('voicedOptions');
+const voicedTextArea = document.getElementById('voicedText');
 const engineDescription = document.getElementById('engineDescription');
 const engineStatus = document.getElementById('engineStatus');
 
@@ -348,6 +351,16 @@ conversationToggle.addEventListener('change', () => {
     conversationOptions.style.display = conversationToggle.checked ? 'block' : 'none';
 });
 
+voicedToggle.addEventListener('change', () => {
+    voicedOptions.style.display = voicedToggle.checked ? 'block' : 'none';
+});
+
+// The voiced text the current settings would send, or null when disabled/empty
+function voicedOverride() {
+    if (!voicedToggle.checked) return null;
+    return voicedTextArea.value.trim() || null;
+}
+
 // ========== Conversion ==========
 
 async function handleConversion(endpoint, isVideo = false) {
@@ -357,11 +370,19 @@ async function handleConversion(endpoint, isVideo = false) {
     }
 
     const conversation = conversationToggle.checked;
+    const voiced = voicedOverride();
     if (conversation) {
         const lines = textArea.value.split('\n').map(l => l.trim()).filter(Boolean);
         if (lines.length < 2) {
             showToast('Conversation mode needs at least 2 lines of text');
             return;
+        }
+        if (voiced) {
+            const voicedLines = voiced.split('\n').map(l => l.trim()).filter(Boolean);
+            if (voicedLines.length !== lines.length) {
+                showToast(`Pronunciation override needs the same number of lines as the text (${lines.length})`);
+                return;
+            }
         }
     }
 
@@ -385,6 +406,9 @@ async function handleConversion(endpoint, isVideo = false) {
     const fontSize = parseInt(document.getElementById('fontSize').value) || 48;
 
     formData.append('text', textArea.value);
+    if (voiced) {
+        formData.append('voiced_text', voiced);
+    }
     formData.append('language', languageSelect.value);
     if (sequence) {
         formData.append('sequence', sequence);
@@ -681,7 +705,7 @@ refreshFilesBtn.addEventListener('click', loadRecentFiles);
 document.querySelectorAll('.copy-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const el = document.getElementById(btn.dataset.copyTarget);
-        const text = el.textContent || el.innerText;
+        const text = el.value ?? (el.textContent || el.innerText);
         navigator.clipboard.writeText(text).then(() => {
             const original = btn.textContent;
             btn.textContent = '✅ Copied!';
@@ -694,7 +718,15 @@ const generateMetadataBtn = document.getElementById('generateMetadataBtn');
 const metadataResult = document.getElementById('metadataResult');
 const metadataTitle = document.getElementById('metadataTitle');
 const metadataDescription = document.getElementById('metadataDescription');
+const titleCharCount = document.getElementById('titleCharCount');
 const llmProvider = document.getElementById('llmProvider');
+
+function updateTitleCharCount() {
+    titleCharCount.textContent = metadataTitle.value.length;
+    titleCharCount.style.color = metadataTitle.value.length > 100 ? '#c0392b' : '';
+}
+
+metadataTitle.addEventListener('input', updateTitleCharCount);
 
 // ========== Vocabulary/grammar extraction (review before generating) ==========
 
@@ -819,8 +851,9 @@ generateMetadataBtn.addEventListener('click', async () => {
         const data = await response.json();
 
         if (data.success) {
-            metadataTitle.textContent = data.title;
-            metadataDescription.textContent = data.description;
+            metadataTitle.value = data.title;
+            metadataDescription.value = data.description;
+            updateTitleCharCount();
             metadataResult.style.display = 'block';
             metadataResult.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
@@ -1061,6 +1094,10 @@ uploadYoutubeBtn.addEventListener('click', async () => {
         showToast('Please generate a video first');
         return;
     }
+    if (!metadataTitle.value.trim()) {
+        showToast('The title is empty — write one or regenerate the metadata');
+        return;
+    }
 
     uploadYoutubeBtn.classList.add('loading');
     uploadYoutubeBtn.disabled = true;
@@ -1069,13 +1106,13 @@ uploadYoutubeBtn.addEventListener('click', async () => {
     try {
         const formData = new FormData();
         formData.append('video_filename', lastGeneratedVideoFilename);
-        formData.append('title', metadataTitle.textContent);
-        formData.append('description', metadataDescription.textContent);
+        formData.append('title', metadataTitle.value);
+        formData.append('description', metadataDescription.value);
         formData.append('playlist_id', document.getElementById('playlistSelect').value);
         formData.append('privacy_status', document.getElementById('privacyStatus').value);
 
         // Extract tags from description hashtags (unicode-aware for CJK tags)
-        const hashtags = metadataDescription.textContent.match(/#[\p{L}\p{N}_]+/gu);
+        const hashtags = metadataDescription.value.match(/#[\p{L}\p{N}_]+/gu);
         if (hashtags) {
             formData.append('tags', hashtags.map(h => h.slice(1)).join(','));
         }
