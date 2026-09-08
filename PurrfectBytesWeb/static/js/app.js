@@ -134,8 +134,12 @@ async function loadVoices() {
     const language = languageSelect.value;
     const cacheKey = `${engine}:${language}`;
 
+    // Captured before any rebuild: reloading the list must not throw away the
+    // voices already chosen (auto-detecting the language alone triggers one).
+    const chosen = [voiceSelect.value, voiceSelectB.value];
+
     const applyVoices = (voices) => {
-        for (const select of [voiceSelect, voiceSelectB]) {
+        [voiceSelect, voiceSelectB].forEach((select, index) => {
             select.innerHTML = '<option value="">Default voice</option>';
             voices.forEach(v => {
                 const opt = document.createElement('option');
@@ -143,7 +147,11 @@ async function loadVoices() {
                 opt.textContent = v.name;
                 select.appendChild(opt);
             });
-        }
+            select.value = chosen[index];
+            if (select.value !== chosen[index]) {
+                select.value = '';  // this engine/language doesn't offer that voice
+            }
+        });
     };
 
     if (voiceCache[cacheKey]) {
@@ -170,11 +178,17 @@ ttsEngineSelect.addEventListener('change', () => {
     loadVoices();
     updateConversationAvailability();
 });
-languageSelect.addEventListener('change', loadVoices);
+// Detection while typing may report, but must never silently replace a
+// language the user picked by hand; the Auto-Detect button always applies.
+let languageChosenByUser = false;
+languageSelect.addEventListener('change', () => {
+    languageChosenByUser = true;
+    loadVoices();
+});
 
 // ========== Language detection ==========
 
-async function detectLanguage(text) {
+async function detectLanguage(text, applySelection = true) {
     if (!text || text.trim().length < 3) {
         detectionResult.style.display = 'none';
         return;
@@ -193,14 +207,18 @@ async function detectLanguage(text) {
 
         if (data.language) {
             const previous = languageSelect.value;
-            languageSelect.value = data.language;
+            if (applySelection) {
+                languageSelect.value = data.language;
+            }
             if (languageSelect.value !== previous) {
                 loadVoices();
             }
 
+            const kept = !applySelection && data.language !== previous;
             detectionResult.innerHTML = `
                 ✓ Detected: <strong>${data.language_name}</strong>
                 ${data.confidence ? `(${Math.round(data.confidence * 100)}% confidence)` : ''}
+                ${kept ? '<br><small>Keeping the language you picked — press 🔍 Auto-Detect to switch</small>' : ''}
                 ${data.note ? `<br><small style="color: #f39c12;">${data.note}</small>` : ''}
             `;
             detectionResult.style.display = 'block';
@@ -223,7 +241,7 @@ textArea.addEventListener('input', function () {
 
     if (text.trim().length >= 10) {  // Only detect after 10+ characters
         detectionTimeout = setTimeout(() => {
-            detectLanguage(text);
+            detectLanguage(text, !languageChosenByUser);
         }, 1500); // Wait 1.5 seconds after user stops typing
     }
 });
@@ -238,6 +256,7 @@ autoDetectBtn.addEventListener('click', function () {
 
     autoDetectBtn.disabled = true;
     autoDetectBtn.innerHTML = '🔄 Detecting...';
+    languageChosenByUser = false;
 
     detectLanguage(text).finally(() => {
         autoDetectBtn.disabled = false;
@@ -1054,7 +1073,8 @@ async function loadPlaylists() {
         const data = await response.json();
 
         if (data.success) {
-            // Keep the "No Playlist" option, add fetched playlists
+            // Keep the "No Playlist" option and the chosen playlist, add fetched ones
+            const chosen = playlistSelect.value;
             playlistSelect.innerHTML = '<option value="">— No Playlist —</option>';
             data.playlists.forEach(pl => {
                 const opt = document.createElement('option');
@@ -1062,6 +1082,10 @@ async function loadPlaylists() {
                 opt.textContent = pl.title;
                 playlistSelect.appendChild(opt);
             });
+            playlistSelect.value = chosen;
+            if (playlistSelect.value !== chosen) {
+                playlistSelect.value = '';  // that playlist is gone from the account
+            }
         }
     } catch (e) {
         console.error('Failed to load playlists:', e);
