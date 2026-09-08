@@ -103,7 +103,9 @@ def convert_to_video(
     precedence over `repetitions` and `slow`. When `conversation` is set, lines
     of the text alternate between `voice` and `voice_b`, each rendered as its
     own clip and concatenated; combined with a sequence, each step plays the
-    whole conversation at that step's speed.
+    whole conversation at that step's speed. A line may name its speaker
+    ("직원: 혼자 오셨어요?"): the name stays on screen but is never voiced or
+    highlighted, and lines sharing a name share a voice.
 
     `voiced_text`, when provided, is spoken instead of `text` while the video
     still displays `text` — a pronunciation override for words the TTS engine

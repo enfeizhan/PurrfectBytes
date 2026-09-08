@@ -339,6 +339,41 @@ class TestAPIEndpoints:
         assert [line.text for line in lines] == ["おこなった", "うった"]
         assert [line.speaker for line in lines] == [0, 1]
 
+    def test_conversation_speaker_labels_are_displayed_but_not_voiced(self, client, mocker, temp_dir):
+        """Named speakers stay on screen; only the dialogue after the name is spoken."""
+        from src.api import conversion_routes
+        fake_audio = temp_dir / "labelled.mp3"
+        fake_audio.write_bytes(b"")
+        generate = mocker.patch.object(
+            conversion_routes.tts_service, "generate_audio",
+            return_value=(fake_audio, 1.0),
+        )
+        render = mocker.patch("src.services.video_generation.create_video_with_text")
+
+        text = "직원: 혼자 오셨어요?\n관광객: 아니요, 친구하고 같이 왔어요."
+        response = client.post("/convert-to-video", data={
+            "text": text,
+            "language": "ko",
+            "conversation": "true",
+            "repetitions": "1",
+        })
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+        # Voiced: the dialogue only, with the speaker names stripped
+        assert [call.args[0] for call in generate.call_args_list] == [
+            "혼자 오셨어요?", "아니요, 친구하고 같이 왔어요."
+        ]
+
+        # Displayed: the text as written, with each clip highlighting only its
+        # own line's spoken part (offset past the name)
+        for index, call in enumerate(render.call_args_list):
+            display_text = call.kwargs["display_text"]
+            assert display_text == text
+            spoken, offset = call.args[0], call.kwargs["text_offset"]
+            assert display_text[offset:offset + len(spoken)] == spoken
+
     def test_conversation_voiced_override_line_mismatch_rejected(self, client):
         """A conversation override with a different line count is a 400."""
         for endpoint in ("/repeat-audio", "/convert-to-video"):

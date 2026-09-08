@@ -55,7 +55,9 @@ def repeat_audio_endpoint(
     When `sequence` is provided (e.g. "2n,3s" = 2 normal then 3 slow), it takes
     precedence over `repetitions` and `slow`. When `conversation` is set, lines
     of the text alternate between `voice` and `voice_b`; combined with a
-    sequence, each step plays the whole conversation at that step's speed.
+    sequence, each step plays the whole conversation at that step's speed. A
+    line may name its speaker ("직원: 혼자 오셨어요?"): the name is never voiced,
+    and lines sharing a name share a voice.
     `voiced_text`, when provided, is spoken instead of `text` (pronunciation
     override); in conversation mode it must have the same number of lines.
     """
