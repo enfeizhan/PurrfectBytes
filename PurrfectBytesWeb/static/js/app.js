@@ -129,28 +129,57 @@ function updateEngineDescription() {
 
 const voiceCache = {};
 
+// The voices the user actually picked, remembered apart from what the dropdown
+// can show right now. Changing engine or language rebuilds the option list, and
+// a voice the new list doesn't offer must not erase the choice — reading it
+// back off the <select> would, because the browser silently drops a value that
+// isn't among the options. Kept here, the pick reappears on the way back.
+const preferredVoices = ['', ''];
+
+// Only a newer request may repaint the list: a slow reply for the engine or
+// language the user has already moved on from must not overwrite the current one.
+let voiceRequestSeq = 0;
+
+// A voice list that arrived while its dropdown was open, held until it closes.
+const pendingVoiceRepaint = [null, null];
+
+// An open <select> is the focused element, and the browser closes its option
+// list the instant those options are replaced. So never repaint one in use.
+const listIsOpen = (select) => document.activeElement === select;
+
+// Replaces one dropdown's options and re-applies the remembered pick.
+function repaintVoiceSelect(select, index, voices) {
+    select.innerHTML = '<option value="">Default voice</option>';
+    voices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = v.name;
+        select.appendChild(opt);
+    });
+    select.value = preferredVoices[index];
+    if (select.value !== preferredVoices[index]) {
+        // Not offered here — show Default, but keep the preference so
+        // switching back to the other engine/language restores it.
+        select.value = '';
+    }
+}
+
 async function loadVoices() {
     const engine = ttsEngineSelect.value;
     const language = languageSelect.value;
     const cacheKey = `${engine}:${language}`;
-
-    // Captured before any rebuild: reloading the list must not throw away the
-    // voices already chosen (auto-detecting the language alone triggers one).
-    const chosen = [voiceSelect.value, voiceSelectB.value];
+    const requestSeq = ++voiceRequestSeq;
 
     const applyVoices = (voices) => {
         [voiceSelect, voiceSelectB].forEach((select, index) => {
-            select.innerHTML = '<option value="">Default voice</option>';
-            voices.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v.id;
-                opt.textContent = v.name;
-                select.appendChild(opt);
-            });
-            select.value = chosen[index];
-            if (select.value !== chosen[index]) {
-                select.value = '';  // this engine/language doesn't offer that voice
+            if (listIsOpen(select)) {
+                // Its option list is open under the pointer right now, and
+                // replacing the options would snap it shut — which is what
+                // detection firing 1.5s after you stop typing used to do.
+                pendingVoiceRepaint[index] = voices;
+                return;
             }
+            repaintVoiceSelect(select, index, voices);
         });
     };
 
@@ -159,19 +188,41 @@ async function loadVoices() {
         return;
     }
 
-    voiceSelect.innerHTML = '<option value="">Loading voices…</option>';
+    if (!listIsOpen(voiceSelect)) {
+        // Skipped while the list is open: the placeholder would close it, and
+        // keeping the previous voices on screen for a moment is no worse.
+        voiceSelect.innerHTML = '<option value="">Loading voices…</option>';
+    }
     try {
         const response = await fetch(`/tts-voices/${engine}?language=${encodeURIComponent(language)}`);
         const data = await response.json();
         const voices = data.voices || [];
         voiceCache[cacheKey] = voices;
+        if (requestSeq !== voiceRequestSeq) return;
         applyVoices(voices);
     } catch (error) {
         console.error('Failed to load voices:', error);
-        voiceSelect.innerHTML = '<option value="">Default voice</option>';
-        voiceSelectB.innerHTML = '<option value="">Default voice</option>';
+        if (requestSeq !== voiceRequestSeq) return;
+        applyVoices([]);  // Default only, still honouring the remembered pick
     }
 }
+
+// A pick by hand is the only thing that changes the preference; the fallbacks
+// above set .value programmatically, which fires no change event.
+[voiceSelect, voiceSelectB].forEach((select, index) => {
+    select.addEventListener('change', () => {
+        preferredVoices[index] = select.value;
+    });
+    // Change fires before blur, so a pick made just now is already remembered
+    // and survives the repaint that was waiting for the list to close.
+    select.addEventListener('blur', () => {
+        const held = pendingVoiceRepaint[index];
+        if (held) {
+            pendingVoiceRepaint[index] = null;
+            repaintVoiceSelect(select, index, held);
+        }
+    });
+});
 
 ttsEngineSelect.addEventListener('change', () => {
     updateEngineDescription();
@@ -190,7 +241,7 @@ languageSelect.addEventListener('change', () => {
 
 async function detectLanguage(text, applySelection = true) {
     if (!text || text.trim().length < 3) {
-        detectionResult.style.display = 'none';
+        detectionResult.innerHTML = '';
         return;
     }
 
@@ -221,13 +272,11 @@ async function detectLanguage(text, applySelection = true) {
                 ${kept ? '<br><small>Keeping the language you picked — press 🔍 Auto-Detect to switch</small>' : ''}
                 ${data.note ? `<br><small style="color: #f39c12;">${data.note}</small>` : ''}
             `;
-            detectionResult.style.display = 'block';
             detectionResult.style.color = data.error ? '#e74c3c' : '#27ae60';
         }
     } catch (error) {
         console.error('Language detection failed:', error);
         detectionResult.innerHTML = '❌ Detection failed';
-        detectionResult.style.display = 'block';
         detectionResult.style.color = '#e74c3c';
     }
 }

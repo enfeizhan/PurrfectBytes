@@ -123,6 +123,18 @@ input[type="number"]:focus {
     margin-top: 6px;
     font-size: 12px;
     color: #666;
+    /* Height is reserved while empty so that filling one in later does not
+       push the controls below it down. A native <select> popup is anchored to
+       its element, and the browser closes the popup the moment that element
+       moves — which is why an open dropdown used to snap shut when language
+       detection reported, 1.5s after typing stopped. */
+    min-height: 1.25em;
+}
+
+#detectionResult {
+    /* Detection can add a second line (a low-confidence note, or the reminder
+       that a hand-picked language is being kept), so reserve for two. */
+    min-height: 2.5em;
 }
 
 .button-row {
