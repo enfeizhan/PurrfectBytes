@@ -8,6 +8,8 @@ This module provides a unified interface for different TTS engines:
 
 import asyncio
 import subprocess
+import threading
+import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -167,10 +169,55 @@ class EdgeTTSEngine(BaseTTSEngine):
         "vi": "vi-VN-HoaiMyNeural",
     }
     
-    def __init__(self, audio_dir: Path, audio_format: str = "mp3"):
-        super().__init__(audio_dir, audio_format)
-        self._voices_cache: Optional[List[Dict[str, Any]]] = None
-    
+    # Listing voices fetches the entire Microsoft catalogue (~320 voices,
+    # ~135 KB) just to show the handful for one language, and takes about a
+    # second. It changes on the order of months, so hold it process-wide behind
+    # a TTL instead of paying that on every engine or language switch.
+    VOICE_CACHE_TTL_SECONDS = 6 * 3600
+    _catalogue: Optional[List[Dict[str, Any]]] = None
+    _catalogue_fetched_at: float = 0.0
+    _catalogue_lock = threading.Lock()
+
+    @classmethod
+    def _voice_catalogue(cls) -> List[Dict[str, Any]]:
+        """Every Edge voice, fetched at most once per TTL.
+
+        A stale catalogue is served when a refresh fails - an out-of-date voice
+        list beats an empty dropdown.
+        """
+        import concurrent.futures
+
+        import edge_tts
+
+        with cls._catalogue_lock:
+            if (cls._catalogue is not None
+                    and time.monotonic() - cls._catalogue_fetched_at < cls.VOICE_CACHE_TTL_SECONDS):
+                return cls._catalogue
+
+            async def _get_voices():
+                return await edge_tts.list_voices()
+
+            # A fresh event loop in its own thread: this runs inside FastAPI's
+            # threadpool, where asyncio.run() would hit a running loop.
+            def run_in_thread():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(_get_voices())
+                finally:
+                    loop.close()
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    cls._catalogue = executor.submit(run_in_thread).result(timeout=30)
+                cls._catalogue_fetched_at = time.monotonic()
+                logger.info(f"Fetched Edge-TTS voice catalogue ({len(cls._catalogue)} voices)")
+            except Exception as e:
+                if cls._catalogue is None:
+                    raise
+                logger.warning(f"Could not refresh Edge-TTS voices, serving cached list: {e}")
+            return cls._catalogue
+
     def generate(
         self,
         text: str,
@@ -241,27 +288,9 @@ class EdgeTTSEngine(BaseTTSEngine):
     
     def get_available_voices(self, language: str = "en") -> List[Dict[str, str]]:
         """Get available Edge-TTS voices for a language."""
-        import edge_tts
-        import concurrent.futures
-        
         try:
-            async def _get_voices():
-                voices = await edge_tts.list_voices()
-                return voices
-            
-            # Run async code in a new event loop in a separate thread
-            def run_in_thread():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    return loop.run_until_complete(_get_voices())
-                finally:
-                    loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                all_voices = future.result(timeout=30)
-            
+            all_voices = self._voice_catalogue()
+
             # Filter by language
             lang_prefix = language.lower()
             filtered = [

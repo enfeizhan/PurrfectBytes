@@ -162,8 +162,6 @@ def convert_to_video(
 
             duration_by_speed = {}
             # Render one audio+video per distinct speed (or per dialogue line).
-            # Must stay sequential: video encoding uses a shared temp-audio.m4a
-            # scratch file.
             if dialogue is None:
                 for slow_flag in sorted({s.slow for s in steps} if steps else {slow}):
                     logger.info(f"Generating audio for video with engine={engine} (slow={slow_flag})")

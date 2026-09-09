@@ -91,7 +91,9 @@ class VideoService:
                 audio_codec='aac',
                 preset='veryfast',
                 threads=os.cpu_count(),
-                temp_audiofile='temp-audio.m4a',
+                # MoviePy uses this name verbatim, so a fixed relative one had
+                # every render sharing one scratch file in the working directory.
+                temp_audiofile=str(video_path.with_suffix('.temp-audio.m4a')),
                 remove_temp=True,
                 logger=None  # Suppress output
             )
@@ -315,7 +317,7 @@ class VideoService:
                 audio_codec='aac',
                 preset='veryfast',
                 threads=os.cpu_count(),
-                temp_audiofile='temp-audio.m4a',
+                temp_audiofile=str(output_path.with_suffix('.temp-audio.m4a')),
                 remove_temp=True,
                 logger=None  # Suppress output
             )

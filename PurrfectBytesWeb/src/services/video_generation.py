@@ -13,8 +13,9 @@ of the modular architecture.
 
 import os
 import numpy as np
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from moviepy.video.VideoClip import VideoClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
@@ -168,12 +169,27 @@ def _load_font_for_text(text: str, font_size: int = 48) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+@lru_cache(maxsize=64)
+def _resolve_font_path(text: str, font_size: int) -> Optional[str]:
+    """Path of the first font that can render `text`, or None for the bitmap fallback.
+
+    Resolving means probing candidate files glyph by glyph, and walking every
+    font directory when the primary paths miss. Glyph coverage doesn't change
+    between renders, so pay for the search once per distinct text.
+    """
+    return getattr(_load_font_for_text(text, font_size), "path", None)
+
+
 def load_font(font_size: int = 48, text: str = None) -> ImageFont.ImageFont:
-    """Load a font - optionally optimized for specific text."""
-    if text:
-        return _load_font_for_text(text, font_size)
-    else:
-        return _load_font_for_text("ABCabc123", font_size)
+    """Load a font - optionally optimized for specific text.
+
+    Each caller gets its own font object (they are not safe to share between
+    threads); only the path lookup is cached.
+    """
+    path = _resolve_font_path(text if text else "ABCabc123", font_size)
+    if path is None:
+        return ImageFont.load_default()
+    return ImageFont.truetype(path, font_size)
 
 
 def analyze_audio_timing(text: str, audio_path, duration: Optional[float] = None) -> list:
@@ -286,42 +302,43 @@ def _draw_slow_badge(img: Image.Image) -> None:
               fill=(255, 255, 255))
 
 
-def _load_assets(show_qr_code: bool = False):
-    """Load background image, QR code, and cat logo from assets directory."""
-    # Load background image
-    background_img = None
-    try:
-        bg_path = ASSETS_DIR / "background.png"
-        bg_img = Image.open(bg_path).convert("RGB")
-        background_img = bg_img.resize((1280, 720), Image.Resampling.LANCZOS)
-        logger.debug("Background image loaded successfully")
-    except Exception as e:
-        logger.debug(f"Background image not found, using solid color: {e}")
+@lru_cache(maxsize=16)
+def _decode_asset(path: str, mode: str, size: Tuple[int, int], mtime: float) -> Image.Image:
+    """Decode and resize one overlay asset.
 
-    # Load QR code if enabled
-    qr_code_img = None
+    The source PNGs are around a megapixel each, so the LANCZOS resize down to
+    the sizes actually drawn costs ~150ms for the three of them - which used to
+    be paid again for every rendered clip and every preview. `mtime` is part of
+    the key so editing an asset on disk is still picked up without a restart.
+    """
+    return Image.open(path).convert(mode).resize(size, Image.Resampling.LANCZOS)
+
+
+def _load_asset(name: str, mode: str, size: Tuple[int, int]) -> Optional[Image.Image]:
+    """Load one asset from ASSETS_DIR, or None when it isn't there."""
+    path = ASSETS_DIR / name
+    try:
+        return _decode_asset(str(path), mode, size, path.stat().st_mtime)
+    except (OSError, ValueError) as e:
+        logger.debug(f"Asset {name} unavailable: {e}")
+        return None
+
+
+def _load_assets(show_qr_code: bool = False):
+    """Background image, QR code, and cat logo, decoded once and reused.
+
+    The returned images are shared cache entries - copy before drawing on them.
+    """
     qr_size = QR_CODE_CONFIG.get("size", 120)
     qr_margin = QR_CODE_CONFIG.get("margin", 20)
     qr_opacity = QR_CODE_CONFIG.get("opacity", 0.9)
-    if show_qr_code:
-        try:
-            qr_path = ASSETS_DIR / "paypal_qr.png"
-            qr_img = Image.open(qr_path).convert("RGBA")
-            qr_code_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
-            logger.debug(f"QR code loaded, size: {qr_size}x{qr_size}")
-        except Exception as e:
-            logger.debug(f"QR code image not found: {e}")
-
-    # Load cat logo
-    cat_logo = None
     cat_size = 80
-    try:
-        logo_path = ASSETS_DIR / "logo_small.png"
-        cat_img = Image.open(logo_path).convert("RGBA")
-        cat_logo = cat_img.resize((cat_size, cat_size), Image.Resampling.LANCZOS)
-        logger.debug(f"Cat logo loaded, size: {cat_size}x{cat_size}")
-    except Exception as e:
-        logger.warning(f"Could not load cat logo: {e}")
+
+    background_img = _load_asset("background.png", "RGB", (1280, 720))
+    qr_code_img = _load_asset("paypal_qr.png", "RGBA", (qr_size, qr_size)) if show_qr_code else None
+    cat_logo = _load_asset("logo_small.png", "RGBA", (cat_size, cat_size))
+    if cat_logo is None:
+        logger.warning("Could not load cat logo")
 
     return background_img, qr_code_img, cat_logo, qr_size, qr_margin, qr_opacity, cat_size
 
@@ -438,7 +455,9 @@ def create_character_animated_video(
         audio_codec='aac',
         preset='veryfast',
         threads=os.cpu_count(),
-        temp_audiofile='temp-audio.m4a',
+        # MoviePy uses this name verbatim, so a fixed relative one had every
+        # render sharing one scratch file in the process's working directory.
+        temp_audiofile=str(Path(output_path).with_suffix('.temp-audio.m4a')),
         remove_temp=True,
         logger=None
     )
