@@ -143,8 +143,10 @@ let voiceRequestSeq = 0;
 // A voice list that arrived while its dropdown was open, held until it closes.
 const pendingVoiceRepaint = [null, null];
 
-// An open <select> is the focused element, and the browser closes its option
-// list the instant those options are replaced. So never repaint one in use.
+// Never rebuild a list the user is reading: the options would change under
+// them mid-choice. (Rebuilding does not itself close the list - that was an
+// earlier mis-diagnosis - but swapping the choices out from under a reader is
+// its own bug.)
 const listIsOpen = (select) => document.activeElement === select;
 
 // Replaces one dropdown's options and re-applies the remembered pick.
