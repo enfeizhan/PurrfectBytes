@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=block" rel="stylesheet">
+<style>html,body{margin:0;width:2560px;height:1440px;overflow:hidden}svg{display:block}</style>
+</head><body>
+<!-- Channel banner in the journal look of background B. 2560x1440; YouTube only promises the
+     centre 1544x423 (x 508-2052, y 508-932) on every device, so the cat, name and line stay in there.
+     Desktop shows the full width of that strip; only TVs show the rest. -->
+<svg width="2560" height="1440" viewBox="0 0 2560 1440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="dots" width="44" height="44" patternUnits="userSpaceOnUse">
+      <circle cx="22" cy="22" r="2.6" fill="#E9D2AA"/>
+    </pattern>
+    <pattern id="stripes" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="13" height="26" fill="#FFFFFF" opacity="0.28"/>
+    </pattern>
+    <g id="paw" fill="#E7B98A">
+      <ellipse cx="0" cy="10" rx="22" ry="18"/>
+      <circle cx="-24" cy="-14" r="8.5"/><circle cx="-8" cy="-26" r="8.5"/>
+      <circle cx="10" cy="-26" r="8.5"/><circle cx="25" cy="-13" r="8.5"/>
+    </g>
+  </defs>
+  <rect width="2560" height="1440" fill="#FFF7E8"/>
+  <rect width="2560" height="1440" fill="url(#dots)"/>
+
+  <!-- binding (TV only) -->
+  <rect x="0" y="0" width="46" height="1440" fill="#F1DFC0"/>
+  <g stroke-linecap="round">
+    <g id="ring">
+      <circle cx="70" cy="70" r="9" fill="#E2CBA4"/>
+      <path d="M70 70 C 46 54, 16 54, 12 70" fill="none" stroke="#9C8F82" stroke-width="8"/>
+    </g>
+    <use href="#ring" y="80"/><use href="#ring" y="160"/><use href="#ring" y="240"/>
+    <use href="#ring" y="320"/><use href="#ring" y="400"/><use href="#ring" y="480"/>
+    <use href="#ring" y="560"/><use href="#ring" y="640"/><use href="#ring" y="720"/>
+    <use href="#ring" y="800"/><use href="#ring" y="880"/><use href="#ring" y="960"/>
+    <use href="#ring" y="1040"/><use href="#ring" y="1120"/><use href="#ring" y="1200"/>
+    <use href="#ring" y="1280"/>
+  </g>
+
+  <!-- paw prints walking in from the left (desktop and TV) -->
+  <g opacity="0.75">
+    <use href="#paw" transform="translate(150 820) rotate(60) scale(1.2)"/>
+    <use href="#paw" transform="translate(230 720) rotate(70) scale(1.2)"/>
+    <use href="#paw" transform="translate(320 800) rotate(60) scale(1.2)"/>
+    <use href="#paw" transform="translate(400 700) rotate(70) scale(1.2)"/>
+  </g>
+
+  <!-- the cat, the name on washi tape, and the series line (all devices) -->
+  <image href="../logo_small.png" x="556" y="540" width="360" height="360"/>
+  <g transform="translate(980 568) rotate(-2)">
+    <path d="M0 0 h1020 l-12 16 l12 16 l-12 16 l12 16 l-12 16 l12 16 l-12 16 l12 16 l-12 16 l12 18 H0 l12 -18 l-12 -16 l12 -16 l-12 -16 l12 -16 l-12 -16 l12 -16 l-12 -16 l12 -16 Z" fill="#F2B661" opacity="0.92"/>
+    <rect x="12" y="0" width="996" height="162" fill="url(#stripes)"/>
+    <text x="510" y="124" text-anchor="middle" font-family="Fredoka" font-weight="600" font-size="128" fill="#6B4226">Purrfect Bytes</text>
+  </g>
+  <text x="1490" y="830" text-anchor="middle" font-family="Fredoka" font-weight="500" font-size="52" fill="#8A5530">My Study Journal · Reading &amp; Pronunciation</text>
+
+  <!-- pencil on the right (desktop and TV) -->
+  <g transform="translate(2130 830) rotate(-14)" stroke="#6B4226" stroke-width="6" stroke-linejoin="round">
+    <rect x="-52" y="0" width="52" height="46" rx="9" fill="#F29C9C"/>
+    <rect x="-10" y="0" width="22" height="46" fill="#C8C0B6"/>
+    <rect x="12" y="0" width="300" height="46" fill="#F2C14E"/>
+    <line x1="12" y1="23" x2="312" y2="23" stroke="#E0A93A" stroke-width="5"/>
+    <path d="M312 0 L380 23 L312 46 Z" fill="#F4DAB0"/>
+    <path d="M356 15 L380 23 L356 31 Z" fill="#50321E" stroke="none"/>
+  </g>
+</svg>
+</body></html>
