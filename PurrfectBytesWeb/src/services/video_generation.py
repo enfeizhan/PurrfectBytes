@@ -327,6 +327,9 @@ def _load_asset(name: str, mode: str, size: Tuple[int, int]) -> Optional[Image.I
 def _load_assets(show_qr_code: bool = False):
     """Background image, QR code, and cat logo, decoded once and reused.
 
+    With the QR code the background is the one carrying the note that points
+    at it; without, that note would point at nothing.
+
     The returned images are shared cache entries - copy before drawing on them.
     """
     qr_size = QR_CODE_CONFIG.get("size", 120)
@@ -334,7 +337,8 @@ def _load_assets(show_qr_code: bool = False):
     qr_opacity = QR_CODE_CONFIG.get("opacity", 0.9)
     cat_size = 80
 
-    background_img = _load_asset("background.png", "RGB", (1280, 720))
+    background_name = "background_qr.png" if show_qr_code else "background.png"
+    background_img = _load_asset(background_name, "RGB", (1280, 720))
     qr_code_img = _load_asset("paypal_qr.png", "RGBA", (qr_size, qr_size)) if show_qr_code else None
     cat_logo = _load_asset("logo_small.png", "RGBA", (cat_size, cat_size))
     if cat_logo is None:

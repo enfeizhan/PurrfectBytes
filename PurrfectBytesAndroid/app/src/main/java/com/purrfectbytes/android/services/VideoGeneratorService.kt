@@ -132,12 +132,16 @@ class VideoGeneratorService internal constructor(
         }
     }
 
-    /** Background, QR code and logo at the size they are drawn; decoded once, then reused. */
+    /**
+     * Background, QR code and logo at the size they are drawn; decoded once, then reused.
+     * The QR code is always drawn, so the background is always the one with the note
+     * that points at it.
+     */
     private class Assets(val background: Bitmap?, val qrCode: Bitmap?, val logo: Bitmap?)
 
     private val assets: Assets by lazy {
         Assets(
-            background = decode(R.drawable.background, FrameRenderer.WIDTH, FrameRenderer.HEIGHT),
+            background = decode(R.drawable.background_qr, FrameRenderer.WIDTH, FrameRenderer.HEIGHT),
             qrCode = decode(R.drawable.paypal_qr, FrameRenderer.QR_SIZE, FrameRenderer.QR_SIZE),
             logo = decode(R.drawable.logo_small, FrameRenderer.LOGO_SIZE, FrameRenderer.LOGO_SIZE)
         )

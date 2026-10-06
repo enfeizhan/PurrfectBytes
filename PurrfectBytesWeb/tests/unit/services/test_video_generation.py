@@ -2,7 +2,24 @@
 
 from PIL import Image, ImageDraw, ImageFont
 
+import src.services.video_generation as video_generation
 from src.services.video_generation import _compute_char_layout, _map_text_positions
+
+
+class TestBackgroundChoice:
+    """The QR code gets the background whose note points at it."""
+
+    def _background(self, tmp_path, monkeypatch, show_qr_code):
+        Image.new('RGB', (1280, 720), (255, 0, 0)).save(tmp_path / "background.png")
+        Image.new('RGB', (1280, 720), (0, 0, 255)).save(tmp_path / "background_qr.png")
+        monkeypatch.setattr(video_generation, "ASSETS_DIR", tmp_path)
+        return video_generation._load_assets(show_qr_code)[0]
+
+    def test_without_qr_code(self, tmp_path, monkeypatch):
+        assert self._background(tmp_path, monkeypatch, False).getpixel((0, 0)) == (255, 0, 0)
+
+    def test_with_qr_code(self, tmp_path, monkeypatch):
+        assert self._background(tmp_path, monkeypatch, True).getpixel((0, 0)) == (0, 0, 255)
 
 
 class TestCharLayoutAlignment:
