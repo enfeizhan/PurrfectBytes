@@ -1,104 +1,80 @@
 package com.purrfectbytes.android.ui.components
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toSize
 import coil.compose.AsyncImage
+import com.purrfectbytes.android.services.RecognitionScript
+import com.purrfectbytes.android.services.RecognizedText
 import com.purrfectbytes.android.services.RecognizedTextBlock
-import java.io.InputStream
-import kotlin.math.min
+import java.util.Locale
 
+/** How a photo is placed inside the view that shows it. */
 data class ImageTransformation(
-    val scaleX: Float,
-    val scaleY: Float,
+    val scale: Float,
     val offsetX: Float,
     val offsetY: Float,
     val displayWidth: Int,
     val displayHeight: Int
 )
 
+/**
+ * Where ContentScale.Fit puts a photo of [imageWidth] x [imageHeight] pixels inside a
+ * view of [viewWidth] x [viewHeight]: as large as fits, centered. Null when a size is missing.
+ */
+fun fitTransformation(viewWidth: Int, viewHeight: Int, imageWidth: Int, imageHeight: Int): ImageTransformation? {
+    if (viewWidth <= 0 || viewHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) return null
+
+    val scale = minOf(viewWidth.toFloat() / imageWidth, viewHeight.toFloat() / imageHeight)
+    val displayWidth = (imageWidth * scale).toInt()
+    val displayHeight = (imageHeight * scale).toInt()
+    return ImageTransformation(
+        scale = scale,
+        offsetX = (viewWidth - displayWidth) / 2f,
+        offsetY = (viewHeight - displayHeight) / 2f,
+        displayWidth = displayWidth,
+        displayHeight = displayHeight
+    )
+}
+
+/**
+ * A photo with a box around every block of text found in it. Tapping a box selects its text.
+ *
+ * The boxes are placed with the size of the photo as the text recognizer saw it
+ * (upright, whatever way the camera was held), so they line up with what is shown.
+ */
 @Composable
 fun PrecisePhotoTextOverlay(
     photoUri: Uri,
-    recognizedBlocks: List<RecognizedTextBlock>,
+    recognized: RecognizedText?,
     onTextClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val density = LocalDensity.current
+    val blocks = recognized?.blocks.orEmpty()
     var imageViewSize by remember { mutableStateOf(IntSize.Zero) }
-    var selectedBlock by remember { mutableStateOf<RecognizedTextBlock?>(null) }
-    var imageBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var transformation by remember { mutableStateOf<ImageTransformation?>(null) }
+    var selectedBlock by remember(recognized) { mutableStateOf<RecognizedTextBlock?>(null) }
     var showDebug by remember { mutableStateOf(false) }
 
-    // Load the image bitmap to get original dimensions
-    LaunchedEffect(photoUri) {
-        try {
-            val inputStream: InputStream? = context.contentResolver.openInputStream(photoUri)
-            imageBitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    // Calculate precise transformation when both view size and bitmap are available
-    LaunchedEffect(imageViewSize, imageBitmap) {
-        val bitmap = imageBitmap
-        if (imageViewSize != IntSize.Zero && bitmap != null) {
-            // Calculate how ContentScale.Fit will display the image
-            val imageAspectRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
-            val viewAspectRatio = imageViewSize.width.toFloat() / imageViewSize.height.toFloat()
-
-            val (displayWidth, displayHeight, scale) = if (imageAspectRatio > viewAspectRatio) {
-                // Image is wider - constrained by width
-                val displayWidth = imageViewSize.width
-                val displayHeight = (displayWidth / imageAspectRatio).toInt()
-                val scale = displayWidth.toFloat() / bitmap.width.toFloat()
-                Triple(displayWidth, displayHeight, scale)
-            } else {
-                // Image is taller - constrained by height
-                val displayHeight = imageViewSize.height
-                val displayWidth = (displayHeight * imageAspectRatio).toInt()
-                val scale = displayHeight.toFloat() / bitmap.height.toFloat()
-                Triple(displayWidth, displayHeight, scale)
-            }
-
-            val offsetX = (imageViewSize.width - displayWidth) / 2f
-            val offsetY = (imageViewSize.height - displayHeight) / 2f
-
-            transformation = ImageTransformation(
-                scaleX = scale,
-                scaleY = scale,
-                offsetX = offsetX,
-                offsetY = offsetY,
-                displayWidth = displayWidth,
-                displayHeight = displayHeight
-            )
+    val transformation = remember(imageViewSize, recognized) {
+        recognized?.let {
+            fitTransformation(imageViewSize.width, imageViewSize.height, it.imageWidth, it.imageHeight)
         }
     }
 
@@ -112,7 +88,7 @@ fun PrecisePhotoTextOverlay(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (recognizedBlocks.isNotEmpty()) "${recognizedBlocks.size} text blocks found" else "No text detected",
+                text = if (blocks.isNotEmpty()) "${blocks.size} text blocks found" else "No text detected",
                 style = MaterialTheme.typography.bodySmall
             )
 
@@ -142,91 +118,71 @@ fun PrecisePhotoTextOverlay(
 
             // Overlay clickable regions for text blocks
             transformation?.let { transform ->
-                val bitmap = imageBitmap
-                if (bitmap != null) {
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { imageViewSize.height.toDp() })
-                    ) {
-                        recognizedBlocks.forEach { block ->
-                            block.boundingBox?.let { rect ->
-                                // Transform coordinates from original image to display coordinates
-                                val left = rect.left * transform.scaleX + transform.offsetX
-                                val top = rect.top * transform.scaleY + transform.offsetY
-                                val width = rect.width() * transform.scaleX
-                                val height = rect.height() * transform.scaleY
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { imageViewSize.height.toDp() })
+                ) {
+                    blocks.forEach { block ->
+                        block.boundingBox?.let { rect ->
+                            // Transform coordinates from original image to display coordinates
+                            val topLeft = Offset(
+                                rect.left * transform.scale + transform.offsetX,
+                                rect.top * transform.scale + transform.offsetY
+                            )
+                            val size = Size(rect.width() * transform.scale, rect.height() * transform.scale)
 
-                                // Draw bounding box with different colors for better visibility
-                                val color = when {
-                                    selectedBlock == block -> Color.Green
-                                    block.detectedLanguage?.contains("japanese") == true -> Color.Red
-                                    block.detectedLanguage?.contains("chinese") == true -> Color.Blue
-                                    block.detectedLanguage?.contains("korean") == true -> Color.Magenta
-                                    else -> Color.Cyan
-                                }
+                            // Draw bounding box with different colors for better visibility
+                            val color = when {
+                                selectedBlock == block -> Color.Green
+                                block.script == RecognitionScript.JAPANESE -> Color.Red
+                                block.script == RecognitionScript.CHINESE -> Color.Blue
+                                block.script == RecognitionScript.KOREAN -> Color.Magenta
+                                else -> Color.Cyan
+                            }
 
+                            drawRect(
+                                color = color,
+                                topLeft = topLeft,
+                                size = size,
+                                style = Stroke(width = 2.dp.toPx())
+                            )
+
+                            // Draw semi-transparent overlay for selected block
+                            if (selectedBlock == block) {
                                 drawRect(
-                                    color = color,
-                                    topLeft = Offset(left, top),
-                                    size = Size(width, height),
-                                    style = Stroke(width = 2.dp.toPx())
+                                    color = Color.Green.copy(alpha = 0.2f),
+                                    topLeft = topLeft,
+                                    size = size
                                 )
-
-                                // Draw semi-transparent overlay for selected block
-                                if (selectedBlock == block) {
-                                    drawRect(
-                                        color = Color.Green.copy(alpha = 0.2f),
-                                        topLeft = Offset(left, top),
-                                        size = Size(width, height)
-                                    )
-                                }
-
-                                // Debug mode: show coordinates
-                                if (showDebug) {
-                                    drawRect(
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        topLeft = Offset(left, top - 20.dp.toPx()),
-                                        size = Size(100.dp.toPx(), 15.dp.toPx())
-                                    )
-                                }
                             }
                         }
-
-                        // Debug info overlay
-                        if (showDebug) {
-                            drawRect(
-                                color = Color.Black.copy(alpha = 0.7f),
-                                topLeft = Offset(10.dp.toPx(), 10.dp.toPx()),
-                                size = Size(250.dp.toPx(), 80.dp.toPx())
-                            )
-                        }
                     }
+                }
 
-                    // Invisible clickable areas with precise coordinates
-                    recognizedBlocks.forEach { block ->
-                        block.boundingBox?.let { rect ->
-                            val left = rect.left * transform.scaleX + transform.offsetX
-                            val top = rect.top * transform.scaleY + transform.offsetY
-                            val width = rect.width() * transform.scaleX
-                            val height = rect.height() * transform.scaleY
+                // Invisible clickable areas with precise coordinates
+                blocks.forEach { block ->
+                    block.boundingBox?.let { rect ->
+                        val left = rect.left * transform.scale + transform.offsetX
+                        val top = rect.top * transform.scale + transform.offsetY
+                        val width = rect.width() * transform.scale
+                        val height = rect.height() * transform.scale
 
-                            Box(
-                                modifier = Modifier
-                                    .offset(
-                                        x = with(density) { left.toDp() },
-                                        y = with(density) { top.toDp() }
-                                    )
-                                    .size(
-                                        width = with(density) { width.toDp() },
-                                        height = with(density) { height.toDp() }
-                                    )
-                                    .clickable {
-                                        selectedBlock = block
-                                        onTextClick(block.text)
-                                    }
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = with(density) { left.toDp() },
+                                    y = with(density) { top.toDp() }
+                                )
+                                .size(
+                                    width = with(density) { width.toDp() },
+                                    height = with(density) { height.toDp() }
+                                )
+                                .clickable {
+                                    selectedBlock = block
+                                    onTextClick(block.text)
+                                }
+                        )
                     }
                 }
             }
@@ -247,29 +203,16 @@ fun PrecisePhotoTextOverlay(
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium
                         )
-                        Text(
-                            text = "View: ${imageViewSize.width}x${imageViewSize.height}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "Display: ${transform.displayWidth}x${transform.displayHeight}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "Scale: ${String.format("%.3f", transform.scaleX)}x, ${String.format("%.3f", transform.scaleY)}y",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "Offset: ${String.format("%.1f", transform.offsetX)}, ${String.format("%.1f", transform.offsetY)}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        imageBitmap?.let { bitmap ->
+                        listOf(
+                            "View: ${imageViewSize.width}x${imageViewSize.height}",
+                            "Display: ${transform.displayWidth}x${transform.displayHeight}",
+                            "Scale: ${String.format(Locale.US, "%.3f", transform.scale)}",
+                            "Offset: ${String.format(Locale.US, "%.1f", transform.offsetX)}, " +
+                                String.format(Locale.US, "%.1f", transform.offsetY),
+                            "Photo: ${recognized?.imageWidth}x${recognized?.imageHeight}"
+                        ).forEach { line ->
                             Text(
-                                text = "Original: ${bitmap.width}x${bitmap.height}",
+                                text = line,
                                 color = Color.White,
                                 style = MaterialTheme.typography.bodySmall
                             )

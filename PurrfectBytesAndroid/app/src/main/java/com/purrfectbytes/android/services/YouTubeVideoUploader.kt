@@ -1,53 +1,58 @@
 package com.purrfectbytes.android.services
 
-import android.content.Context
-import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import android.util.Log
 import com.google.api.client.http.InputStreamContent
-import com.google.api.client.http.javanet.NetHttpTransport
-import com.google.api.client.json.gson.GsonFactory
-import com.google.api.services.youtube.YouTube
 import com.google.api.services.youtube.model.PlaylistItem
 import com.google.api.services.youtube.model.PlaylistItemSnippet
 import com.google.api.services.youtube.model.ResourceId
 import com.google.api.services.youtube.model.Video
 import com.google.api.services.youtube.model.VideoSnippet
 import com.google.api.services.youtube.model.VideoStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
-import com.google.api.client.http.HttpRequestInitializer
 import javax.inject.Inject
 import javax.inject.Singleton
-class YouTubeVideoUploader @Inject constructor(private val context: Context) {
 
-    suspend fun uploadVideo(
+/**
+ * An uploaded video. [playlistError] says why it could not be added to the chosen
+ * playlist; the video itself is on YouTube either way.
+ */
+data class YouTubeUpload(val videoId: String, val playlistError: String? = null) {
+    /** Where the video is watched. */
+    val url: String get() = "https://www.youtube.com/watch?v=$videoId"
+}
+
+@Singleton
+open class YouTubeVideoUploader @Inject constructor() {
+
+    companion object {
+        private const val TAG = "YouTubeUpload"
+        private const val CATEGORY_EDUCATION = "27"
+    }
+
+    /** [tags] are what the video is found by; the web app sends the hashtags of the description. */
+    open suspend fun uploadVideo(
         videoFile: File,
         title: String,
         description: String,
+        tags: List<String> = emptyList(),
         privacyStatus: String = "private",
         playlistId: String? = null,
         accessToken: String
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<YouTubeUpload> = withContext(Dispatchers.IO) {
         try {
-            val transport = NetHttpTransport()
-            val jsonFactory = GsonFactory.getDefaultInstance()
-
-            val requestInitializer = HttpRequestInitializer { request ->
-                request.headers.authorization = "Bearer $accessToken"
-            }
-
-            val youtubeService = YouTube.Builder(transport, jsonFactory, requestInitializer)
-                .setApplicationName("PurrfectBytes")
-                .build()
+            val youtubeService = youTubeService(accessToken)
 
             val videoObjectDefiningMetadataAndVideo = Video().apply {
                 snippet = VideoSnippet().apply {
                     this.title = title
                     this.description = description
-                    tags = listOf("shorts", "texttospeech", "purrfectbytes")
-                    categoryId = "22" // People & Blogs
+                    if (tags.isNotEmpty()) this.tags = tags
+                    categoryId = CATEGORY_EDUCATION
                 }
                 status = VideoStatus().apply {
                     this.privacyStatus = privacyStatus.lowercase()
@@ -55,20 +60,20 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
                 }
             }
 
-            val mediaContent = InputStreamContent(
-                "video/*",
-                BufferedInputStream(FileInputStream(videoFile))
-            )
-            mediaContent.length = videoFile.length()
+            val returnedVideo = BufferedInputStream(FileInputStream(videoFile)).use { stream ->
+                val mediaContent = InputStreamContent("video/*", stream)
+                mediaContent.length = videoFile.length()
 
-            val videoInsert = youtubeService.videos()
-                .insert("snippet,statistics,status", videoObjectDefiningMetadataAndVideo, mediaContent)
+                youtubeService.videos()
+                    .insert("snippet,status", videoObjectDefiningMetadataAndVideo, mediaContent)
+                    .execute()
+            }
 
-            val returnedVideo = videoInsert.execute()
-            
-            val videoId = returnedVideo?.id ?: return@withContext Result.failure(Exception("Failed to upload"))
+            val videoId = returnedVideo?.id
+                ?: return@withContext Result.failure(Exception("YouTube did not confirm the upload"))
 
             // Add the video to the specified playlist if a playlist ID was provided
+            var playlistError: String? = null
             if (!playlistId.isNullOrEmpty()) {
                 try {
                     val playlistItem = PlaylistItem().apply {
@@ -84,14 +89,17 @@ class YouTubeVideoUploader @Inject constructor(private val context: Context) {
                         .insert("snippet", playlistItem)
                         .execute()
                 } catch (e: Exception) {
-                    // Log but don't fail the whole video upload
-                    e.printStackTrace()
+                    // The video is uploaded; report the playlist problem without failing the upload
+                    Log.e(TAG, "Could not add $videoId to playlist $playlistId", e)
+                    playlistError = e.message ?: e.javaClass.simpleName
                 }
             }
-            
-            Result.success(videoId)
+
+            Result.success(YouTubeUpload(videoId, playlistError))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Upload failed", e)
             Result.failure(e)
         }
     }

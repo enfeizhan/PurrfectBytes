@@ -3,20 +3,23 @@ package com.purrfectbytes.android.services
 import android.content.Context
 import android.graphics.Rect
 import android.net.Uri
+import android.util.Log
 import com.google.android.gms.tasks.Tasks
-import com.google.mlkit.nl.languageid.LanguageIdentification
-import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
-import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,6 +28,9 @@ data class RecognizedTextBlock(
     val text: String,
     val boundingBox: Rect?,
     val lines: List<RecognizedTextLine>,
+    /** The recognizer that read the block. */
+    val script: RecognitionScript? = null,
+    /** The language of the text as a code such as "ja", when it could be told. */
     val detectedLanguage: String? = null
 )
 
@@ -39,127 +45,126 @@ data class RecognizedTextElement(
     val boundingBox: Rect?
 )
 
-enum class RecognitionScript {
-    LATIN,
-    CHINESE,
-    JAPANESE,
-    KOREAN,
-    DEVANAGARI,
-    AUTO
+enum class RecognitionScript(val displayName: String) {
+    LATIN("Latin"),
+    CHINESE("Chinese"),
+    JAPANESE("Japanese"),
+    KOREAN("Korean"),
+    DEVANAGARI("Devanagari"),
+    AUTO("Auto")
 }
+
+/**
+ * The text found in a photo. The boxes of the blocks are positions in the upright
+ * photo, which is [imageWidth] by [imageHeight] pixels.
+ */
+data class RecognizedText(
+    val blocks: List<RecognizedTextBlock>,
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val script: RecognitionScript
+)
 
 @Singleton
 class TextRecognitionProcessor @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val languageDetector: LanguageDetector
 ) {
-    // Initialize recognizers for different scripts
-    private val latinRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private val chineseRecognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-    private val japaneseRecognizer = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-    private val koreanRecognizer = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-    private val devanagariRecognizer = TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
+    companion object {
+        private const val TAG = "TextRecognition"
+        private val SCRIPTS = RecognitionScript.values().filter { it != RecognitionScript.AUTO }
+    }
 
-    private val languageIdentifier = LanguageIdentification.getClient(
-        LanguageIdentificationOptions.Builder()
-            .setConfidenceThreshold(0.3f)
-            .build()
-    )
+    // Created when first used, and again after close()
+    private val recognizers = mutableMapOf<RecognitionScript, TextRecognizer>()
+
+    @Synchronized
+    private fun recognizerFor(script: RecognitionScript): TextRecognizer =
+        recognizers.getOrPut(script) {
+            TextRecognition.getClient(
+                when (script) {
+                    RecognitionScript.CHINESE -> ChineseTextRecognizerOptions.Builder().build()
+                    RecognitionScript.JAPANESE -> JapaneseTextRecognizerOptions.Builder().build()
+                    RecognitionScript.KOREAN -> KoreanTextRecognizerOptions.Builder().build()
+                    RecognitionScript.DEVANAGARI -> DevanagariTextRecognizerOptions.Builder().build()
+                    else -> TextRecognizerOptions.DEFAULT_OPTIONS
+                }
+            )
+        }
 
     suspend fun processImageFromUri(
         uri: Uri,
         script: RecognitionScript = RecognitionScript.AUTO
-    ): Result<List<RecognizedTextBlock>> {
+    ): Result<RecognizedText> {
         return withContext(Dispatchers.IO) {
             try {
+                // ML Kit turns the photo upright before reading it, so the boxes it
+                // reports belong to the upright photo
                 val image = InputImage.fromFilePath(context, uri)
 
-                // Try multiple recognizers if AUTO mode
-                val results = if (script == RecognitionScript.AUTO) {
-                    tryMultipleRecognizers(image)
+                val (blocks, usedScript) = if (script == RecognitionScript.AUTO) {
+                    tryAllRecognizers(image)
                 } else {
-                    val recognizer = getRecognizerForScript(script)
-                    val task = recognizer.process(image)
-                    val visionText = Tasks.await(task)
-                    extractTextBlocks(visionText)
+                    recognize(image, script) to script
                 }
 
-                // Identify languages in the recognized text
-                val resultsWithLanguage = identifyLanguages(results)
-
-                Result.success(resultsWithLanguage)
+                Result.success(
+                    RecognizedText(
+                        blocks = identifyLanguages(blocks),
+                        imageWidth = image.width,
+                        imageHeight = image.height,
+                        script = usedScript
+                    )
+                )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                Log.e(TAG, "Text recognition failed", e)
                 Result.failure(e)
             }
         }
     }
 
-    private suspend fun tryMultipleRecognizers(image: InputImage): List<RecognizedTextBlock> {
-        val allResults = mutableListOf<RecognizedTextBlock>()
-        val recognizers = listOf(
-            latinRecognizer to "latin",
-            chineseRecognizer to "chinese",
-            japaneseRecognizer to "japanese",
-            koreanRecognizer to "korean",
-            devanagariRecognizer to "devanagari"
-        )
+    private fun recognize(image: InputImage, script: RecognitionScript): List<RecognizedTextBlock> =
+        extractTextBlocks(Tasks.await(recognizerFor(script).process(image)), script)
 
-        // Try all recognizers and collect results
-        val recognitionResults = mutableListOf<Pair<List<RecognizedTextBlock>, String>>()
-
-        recognizers.forEach { (recognizer, scriptName) ->
-            try {
-                val text = Tasks.await(recognizer.process(image))
-                if (text.text.isNotBlank()) {
-                    val blocks = extractTextBlocks(text)
-                    if (blocks.isNotEmpty()) {
-                        recognitionResults.add(blocks to scriptName)
+    /** Runs every recognizer at the same time and keeps the one that read the most text. */
+    private suspend fun tryAllRecognizers(image: InputImage): Pair<List<RecognizedTextBlock>, RecognitionScript> =
+        coroutineScope {
+            val results = SCRIPTS.map { script ->
+                async {
+                    try {
+                        script to recognize(image, script)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "The ${script.displayName} recognizer failed", e)
+                        script to emptyList()
                     }
                 }
-            } catch (e: Exception) {
-                // Continue with other recognizers
+            }.awaitAll()
+
+            val best = results.maxByOrNull { (_, blocks) -> blocks.sumOf { it.text.length } }
+            if (best == null || best.second.isEmpty()) {
+                emptyList<RecognizedTextBlock>() to RecognitionScript.AUTO
+            } else {
+                best.second to best.first
             }
         }
-
-        // If we have results, pick the one with the most recognized text
-        if (recognitionResults.isNotEmpty()) {
-            // Sort by total text length to find the best match
-            val bestResult = recognitionResults.maxByOrNull { (blocks, _) ->
-                blocks.sumOf { it.text.length }
-            }
-
-            bestResult?.let { (blocks, scriptName) ->
-                // Add script information to blocks
-                allResults.addAll(blocks.map { block ->
-                    block.copy(detectedLanguage = scriptName)
-                })
-            }
-        }
-
-        return allResults
-    }
-
-    private fun getRecognizerForScript(script: RecognitionScript): TextRecognizer {
-        return when (script) {
-            RecognitionScript.CHINESE -> chineseRecognizer
-            RecognitionScript.JAPANESE -> japaneseRecognizer
-            RecognitionScript.KOREAN -> koreanRecognizer
-            RecognitionScript.DEVANAGARI -> devanagariRecognizer
-            else -> latinRecognizer
-        }
-    }
 
     private suspend fun identifyLanguages(blocks: List<RecognizedTextBlock>): List<RecognizedTextBlock> {
         return blocks.map { block ->
             try {
-                val languageCode = Tasks.await(languageIdentifier.identifyLanguage(block.text))
-                block.copy(detectedLanguage = if (languageCode != "und") languageCode else null)
+                block.copy(detectedLanguage = languageDetector.detect(block.text))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 block
             }
         }
     }
 
-    private fun extractTextBlocks(visionText: Text): List<RecognizedTextBlock> {
+    private fun extractTextBlocks(visionText: Text, script: RecognitionScript): List<RecognizedTextBlock> {
         return visionText.textBlocks.map { block ->
             RecognizedTextBlock(
                 text = block.text,
@@ -175,21 +180,16 @@ class TextRecognitionProcessor @Inject constructor(
                             )
                         }
                     )
-                }
+                },
+                script = script
             )
         }
     }
 
-    fun getAllText(blocks: List<RecognizedTextBlock>): String {
-        return blocks.joinToString("\n") { it.text }
-    }
-
+    /** Frees the models. They are loaded again when next needed. */
+    @Synchronized
     fun close() {
-        latinRecognizer.close()
-        chineseRecognizer.close()
-        japaneseRecognizer.close()
-        koreanRecognizer.close()
-        devanagariRecognizer.close()
-        languageIdentifier.close()
+        recognizers.values.forEach { it.close() }
+        recognizers.clear()
     }
 }

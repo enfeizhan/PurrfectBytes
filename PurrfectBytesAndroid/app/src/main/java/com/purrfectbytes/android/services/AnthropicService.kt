@@ -26,11 +26,13 @@ data class AnthropicMessage(
     val content: String
 )
 
+// Gson fills these in without calling the constructor, so anything the answer
+// leaves out arrives as null whatever the type says
 data class AnthropicResponse(
-    val content: List<AnthropicContent>
+    val content: List<AnthropicContent>?
 )
 
 data class AnthropicContent(
-    val type: String,
-    val text: String
+    val type: String?,
+    val text: String?
 )

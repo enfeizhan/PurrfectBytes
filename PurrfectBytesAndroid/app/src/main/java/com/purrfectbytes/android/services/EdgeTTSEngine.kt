@@ -1,171 +1,330 @@
 package com.purrfectbytes.android.services
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import okhttp3.*
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okio.ByteString
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import java.util.UUID
-import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-class EdgeTTSEngine {
+/** Speech saved to a file, with the time of every word when the engine reports them. */
+data class SpeechAudio(
+    val file: File,
+    val wordBoundaries: List<WordBoundary> = emptyList()
+)
 
-    private val client = OkHttpClient()
+/**
+ * Text to speech through the service behind Microsoft Edge's "Read aloud".
+ *
+ * The service is unofficial and free: it needs no key, but Microsoft can change it
+ * without notice. See [EdgeTtsProtocol] for what to update when that happens.
+ */
+@Singleton
+class EdgeTTSEngine internal constructor(
+    private val client: OkHttpClient,
+    private val serviceUrl: String = EdgeTtsProtocol.SERVICE_URL,
+    private val voicesUrl: String = EdgeTtsProtocol.VOICES_URL,
+    /** How long the service may stay silent before the request is given up. */
+    private val idleTimeoutMillis: Long = 60_000,
+    private val clock: () -> Long = System::currentTimeMillis
+) {
+    @Inject
+    constructor() : this(defaultClient())
 
-    private val voiceMap = mapOf(
-        "en" to "en-US-AriaNeural",
-        "es" to "es-ES-ElviraNeural",
-        "fr" to "fr-FR-DeniseNeural",
-        "de" to "de-DE-KatjaNeural",
-        "it" to "it-IT-ElsaNeural",
-        "pt" to "pt-BR-FranciscaNeural",
-        "ru" to "ru-RU-SvetlanaNeural",
-        "ja" to "ja-JP-NanamiNeural",
-        "ko" to "ko-KR-SunHiNeural",
-        "zh" to "zh-CN-XiaoxiaoNeural",
-        "ar" to "ar-SA-ZariyahNeural",
-        "hi" to "hi-IN-SwaraNeural",
-        "nl" to "nl-NL-ColetteNeural",
-        "pl" to "pl-PL-AgnieszkaNeural",
-        "tr" to "tr-TR-EmelNeural",
-        "sv" to "sv-SE-SofieNeural",
-        "da" to "da-DK-ChristelNeural",
-        "no" to "nb-NO-PernilleNeural",
-        "fi" to "fi-FI-NoomiNeural"
-    )
+    companion object {
+        private const val TAG = "EdgeTTS"
 
-    private fun generateSecMsGec(): String {
-        var ticks = (System.currentTimeMillis() / 1000.0)
-        ticks += 11644473600L
-        ticks -= ticks % 300
-        ticks *= 1_000_000_000 / 100.0
-        
-        val stringToHash = String.format(Locale.US, "%.0f", ticks) + "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hashBytes = digest.digest(stringToHash.toByteArray(Charsets.US_ASCII))
-        return hashBytes.joinToString("") { "%02x".format(it) }.uppercase()
+        fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .build()
+
+        // The voices the web app reads with (tts_engines.py, DEFAULT_VOICES)
+        private val VOICES = mapOf(
+            "en" to "en-US-AriaNeural",
+            "es" to "es-ES-ElviraNeural",
+            "fr" to "fr-FR-DeniseNeural",
+            "de" to "de-DE-KatjaNeural",
+            "it" to "it-IT-ElsaNeural",
+            "pt" to "pt-BR-FranciscaNeural",
+            "ru" to "ru-RU-SvetlanaNeural",
+            "ja" to "ja-JP-NanamiNeural",
+            "ko" to "ko-KR-SunHiNeural",
+            "zh" to "zh-CN-XiaoxiaoNeural",
+            "ar" to "ar-SA-ZariyahNeural",
+            "hi" to "hi-IN-SwaraNeural",
+            "nl" to "nl-NL-ColetteNeural",
+            "pl" to "pl-PL-ZofiaNeural",
+            "tr" to "tr-TR-EmelNeural",
+            "sv" to "sv-SE-SofieNeural",
+            "da" to "da-DK-ChristelNeural",
+            "no" to "nb-NO-PernilleNeural",
+            "fi" to "fi-FI-NooraNeural",
+            "vi" to "vi-VN-HoaiMyNeural"
+        )
+        private const val DEFAULT_VOICE = "en-US-AriaNeural"
+
+        /** The voice a language is read with when none is chosen. */
+        fun defaultVoice(languageCode: String): String =
+            VOICES[languageCode.substringBefore("-")] ?: DEFAULT_VOICE
+
+        /** How fast the voice speaks, the way the service is told. */
+        fun rateOf(isSlow: Boolean): String = if (isSlow) "-30%" else "+0%"
     }
 
-    private fun dateToString(): String {
-        val sdf = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        return sdf.format(Date())
-    }
+    /** How far this phone's clock is from the service's, learned when it refuses a token. */
+    @Volatile
+    private var clockSkewSeconds = 0.0
 
-    suspend fun generateAudio(text: String, languageCode: String, isSlow: Boolean, outputFile: File): Result<File> = withContext(Dispatchers.IO) {
-        suspendCancellableCoroutine { continuation ->
-            try {
-                val connectionId = java.util.UUID.randomUUID().toString().replace("-", "")
-                val secMsGec = generateSecMsGec()
-                val muid = java.util.UUID.randomUUID().toString().replace("-", "").uppercase()
-                
-                val url = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1" +
-                        "?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4" +
-                        "&ConnectionId=$connectionId" +
-                        "&Sec-MS-GEC=$secMsGec" +
-                        "&Sec-MS-GEC-Version=1-143.0.3650.75"
+    /** Reads [text] with [voice], or with the voice of the language when none is given. */
+    suspend fun generateAudio(
+        text: String,
+        languageCode: String,
+        isSlow: Boolean,
+        outputFile: File,
+        voice: String? = null
+    ): Result<SpeechAudio> = withContext(Dispatchers.IO) {
+        try {
+            val pieces = EdgeTtsProtocol.prepareText(text)
+            if (pieces.isEmpty()) throw EdgeTtsException("There is no text to read aloud")
 
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0")
-                    .addHeader("Pragma", "no-cache")
-                    .addHeader("Cache-Control", "no-cache")
-                    .addHeader("Accept-Language", "en-US,en;q=0.9")
-                    .addHeader("Cookie", "muid=$muid;")
-                    .build()
+            // The name goes into the request as it is, so it must be one that can
+            val speaker = voice?.takeIf { EdgeTtsProtocol.isVoiceName(it) } ?: defaultVoice(languageCode)
+            val rate = rateOf(isSlow)
 
-                val fos = FileOutputStream(outputFile)
-                val voiceName = voiceMap[languageCode.substringBefore("-")] ?: "en-US-AriaNeural"
-                val rate = if (isSlow) "-30%" else "0%"
-
-                val listener = object : WebSocketListener() {
-                    override fun onOpen(webSocket: WebSocket, response: Response) {
-                        try {
-                            val timestamp = dateToString()
-                            val config = "X-Timestamp:${timestamp}Z\r\nContent-Type: application/json; charset=utf-8\r\nPath: speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":false,\"wordBoundaryEnabled\":true},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}"
-                            webSocket.send(config)
-
-                            val requestId = java.util.UUID.randomUUID().toString().replace("-", "")
-                            
-                            val ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='$voiceName'><prosody rate='$rate'>$text</prosody></voice></speak>"
-                            val reqMsg = "X-RequestId:$requestId\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${timestamp}Z\r\nPath:ssml\r\n\r\n$ssml"
-                            webSocket.send(reqMsg)
-                        } catch (e: Exception) {
-                            fos.close()
-                            if (continuation.isActive) continuation.resumeWithException(e)
-                        }
-                    }
-
-                    override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                        try {
-                            val separator = "Path:audio\r\n"
-                            val textToFind = separator.toByteArray()
-                            val byteArray = bytes.toByteArray()
-                            
-                            var idx = -1
-                            for (i in 0 until byteArray.size - textToFind.size) {
-                                var match = true
-                                for (j in textToFind.indices) {
-                                    if (byteArray[i+j] != textToFind[j]) {
-                                        match = false
-                                        break
-                                    }
-                                }
-                                if (match) {
-                                    idx = i + textToFind.size
-                                    break
-                                }
-                            }
-                            if (idx != -1) {
-                                fos.write(byteArray, idx, byteArray.size - idx)
-                            }
-                        } catch (e: Exception) {
-                            Log.e("EdgeTTS", "Error writing bytes", e)
-                        }
-                    }
-
-                    override fun onMessage(webSocket: WebSocket, textMsg: String) {
-                        if (textMsg.contains("Path:turn.end")) {
-                            webSocket.close(1000, "done")
-                        }
-                    }
-
-                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        try { fos.close() } catch (e: Exception) {}
-                        if (continuation.isActive) {
-                            continuation.resume(Result.success(outputFile))
-                        }
-                    }
-
-                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        try { fos.close() } catch (e: Exception) {}
-                        Log.e("EdgeTTS", "WebSocket Failure", t)
-                        if (continuation.isActive) {
-                            continuation.resume(Result.failure(t))
-                        }
-                    }
-                }
-
-                client.newWebSocket(request, listener)
-
-                continuation.invokeOnCancellation {
-                    try { fos.close() } catch (e: Exception) {}
-                }
-            } catch (e: Exception) {
-                if (continuation.isActive) {
-                    continuation.resume(Result.failure(e))
+            val words = mutableListOf<WordBoundary>()
+            var offsetTicks = 0L
+            FileOutputStream(outputFile).use { audio ->
+                for (piece in pieces) {
+                    offsetTicks = speak(piece, speaker, rate, audio, words, offsetTicks)
                 }
             }
+            Result.success(SpeechAudio(outputFile, words))
+        } catch (e: CancellationException) {
+            outputFile.delete()
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Edge TTS failed", e)
+            outputFile.delete()
+            Result.failure(e)
         }
     }
+
+    /** One request, repeated once with a corrected clock when the service refuses the token. */
+    private suspend fun speak(
+        escapedText: String,
+        voice: String,
+        rate: String,
+        audio: OutputStream,
+        words: MutableList<WordBoundary>,
+        offsetTicks: Long
+    ): Long = withCorrectedClock { stream(escapedText, voice, rate, audio, words, offsetTicks) }
+
+    private suspend fun <T> withCorrectedClock(request: suspend () -> T): T {
+        return try {
+            request()
+        } catch (e: ConnectionRefused) {
+            val serverTime = EdgeTtsProtocol.parseHttpDate(e.serverDate)
+            if (e.code != 403 || serverTime == null) throw e
+            clockSkewSeconds += serverTime - now()
+            request()
+        }
+    }
+
+    /**
+     * All voices of the service, in every language. Throws [EdgeTtsException] or
+     * [IOException] when the list cannot be had.
+     */
+    suspend fun voices(): List<EdgeVoice> = withContext(Dispatchers.IO) {
+        try {
+            withCorrectedClock { requestVoices() }
+        } catch (e: ConnectionRefused) {
+            throw EdgeTtsException(e.message.orEmpty(), e)
+        }
+    }
+
+    private suspend fun requestVoices(): List<EdgeVoice> {
+        val request = Request.Builder()
+            .url(EdgeTtsProtocol.voicesUrl(voicesUrl, now()))
+            .apply { EdgeTtsProtocol.VOICE_HEADERS.forEach { (name, value) -> addHeader(name, value) } }
+            .addHeader("Cookie", "muid=${randomId().uppercase()};")
+            .build()
+
+        return answerTo(request).use { response ->
+            if (!response.isSuccessful) throw ConnectionRefused(response.code, response.header("Date"))
+            val voices = EdgeTtsProtocol.parseVoices(response.body?.string().orEmpty())
+            if (voices.isEmpty()) throw EdgeTtsException("Edge TTS sent an empty list of voices")
+            voices
+        }
+    }
+
+    /** Waits for the answer without holding a thread, and gives up when the caller does. */
+    private suspend fun answerTo(request: Request): Response = suspendCancellableCoroutine { continuation ->
+        val call = client.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                if (continuation.isActive) continuation.resume(response) else response.close()
+            }
+
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+        })
+    }
+
+    private fun now(): Double = clock() / 1000.0 + clockSkewSeconds
+
+    /**
+     * Sends one piece of text and writes the audio that comes back.
+     * Returns where the next piece starts, in ticks from the start of the whole audio.
+     */
+    private suspend fun stream(
+        escapedText: String,
+        voice: String,
+        rate: String,
+        audio: OutputStream,
+        words: MutableList<WordBoundary>,
+        offsetTicks: Long
+    ): Long {
+        val events = Channel<Event>(Channel.UNLIMITED)
+        val request = Request.Builder()
+            .url(EdgeTtsProtocol.connectionUrl(serviceUrl, randomId(), now()))
+            .apply { EdgeTtsProtocol.HEADERS.forEach { (name, value) -> addHeader(name, value) } }
+            .addHeader("Cookie", "muid=${randomId().uppercase()};")
+            .build()
+
+        val socket = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                events.trySend(Event.Open)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                events.trySend(Event.Text(text))
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                events.trySend(Event.Binary(bytes.toByteArray()))
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                events.trySend(Event.Closed)
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                events.trySend(Event.Failed(t, response?.code, response?.header("Date")))
+            }
+        })
+
+        var finished = false
+        try {
+            var audioReceived = false
+            var lastWordEnd = offsetTicks
+
+            while (true) {
+                val event = withTimeoutOrNull(idleTimeoutMillis) { events.receive() }
+                    ?: throw EdgeTtsException("Edge TTS stopped responding")
+
+                when (event) {
+                    Event.Open -> {
+                        val timestamp = EdgeTtsProtocol.timestamp()
+                        socket.send(EdgeTtsProtocol.speechConfigMessage(timestamp))
+                        socket.send(
+                            EdgeTtsProtocol.ssmlMessage(
+                                randomId(),
+                                timestamp,
+                                EdgeTtsProtocol.ssml(voice, rate, escapedText)
+                            )
+                        )
+                    }
+
+                    is Event.Binary -> EdgeTtsProtocol.parseAudioMessage(event.data)?.let {
+                        audio.write(it)
+                        audioReceived = true
+                    }
+
+                    is Event.Text -> when (val message = EdgeTtsProtocol.parseTextMessage(event.data)) {
+                        is EdgeTtsProtocol.TextMessage.Words -> message.words.forEach { word ->
+                            val start = offsetTicks + word.offsetTicks
+                            val end = start + word.durationTicks
+                            words += WordBoundary(
+                                word = word.text,
+                                start = start / EdgeTtsProtocol.TICKS_PER_SECOND,
+                                end = end / EdgeTtsProtocol.TICKS_PER_SECOND
+                            )
+                            lastWordEnd = end
+                        }
+
+                        EdgeTtsProtocol.TextMessage.TurnEnd -> {
+                            if (!audioReceived) throw noAudio()
+                            finished = true
+                            socket.close(1000, "done")
+                            return lastWordEnd + EdgeTtsProtocol.PADDING_TICKS
+                        }
+
+                        EdgeTtsProtocol.TextMessage.Other -> Unit
+                    }
+
+                    Event.Closed -> {
+                        if (!audioReceived) throw noAudio()
+                        finished = true
+                        return lastWordEnd + EdgeTtsProtocol.PADDING_TICKS
+                    }
+
+                    is Event.Failed -> throw if (event.httpCode != null) {
+                        ConnectionRefused(event.httpCode, event.serverDate, event.error)
+                    } else {
+                        EdgeTtsException("Could not reach Edge TTS: ${event.error.message ?: event.error.javaClass.simpleName}", event.error)
+                    }
+                }
+            }
+        } finally {
+            // Also runs when the caller gives up: never leave the connection open
+            if (!finished) socket.cancel()
+        }
+    }
+
+    private fun noAudio() = EdgeTtsException(
+        "Edge TTS returned no audio. Check that the text matches the selected language."
+    )
+
+    private fun randomId(): String = UUID.randomUUID().toString().replace("-", "")
+
+    private sealed interface Event {
+        object Open : Event
+        class Text(val data: String) : Event
+        class Binary(val data: ByteArray) : Event
+        object Closed : Event
+        class Failed(val error: Throwable, val httpCode: Int?, val serverDate: String?) : Event
+    }
+
+    private class ConnectionRefused(val code: Int, val serverDate: String?, cause: Throwable? = null) :
+        Exception(
+            "Edge TTS refused the connection (HTTP $code)" +
+                // Still refused after the clock was corrected: see CHROMIUM_FULL_VERSION
+                if (code == 403) ". If this keeps happening, the Edge version the app reports is too old." else "",
+            cause
+        )
 }

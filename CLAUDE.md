@@ -59,13 +59,17 @@ uv run mypy src/            # Type checking
 
 ```bash
 cd PurrfectBytesAndroid
-./gradlew assembleDebug      # Build debug APK
+./gradlew assembleDebug      # Build debug APK (arm64 libraries only; add -PallAbis for emulators)
 ./gradlew installDebug       # Install on connected device
-./gradlew test               # Unit tests
-./gradlew connectedAndroidTest   # Instrumented tests
+./gradlew testDebugUnitTest  # Unit tests - run on the desktop, no device needed
+./gradlew testDebugUnitTest --tests '*FrameRendererTest*'   # One test class
+./gradlew lintDebug
+./gradlew assembleRelease    # R8-minified, unsigned
 ```
 
-Requirements: JDK 17, Android SDK (minSdk 24, compile/targetSdk 34), `local.properties` with SDK path.
+Requirements: JDK 17+, Android SDK (minSdk 24, compile/targetSdk 34), `local.properties` with SDK path and optionally `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` (compiled into `BuildConfig`).
+
+Tests use Robolectric with native graphics, so frames are laid out and drawn by Android's real text engine. `VideoGeneratorServiceTest` and `RenderFlowTest` encode real videos with the desktop's `ffmpeg`/`ffprobe` (skipped when not installed). LLM providers, Edge TTS and YouTube are always replaced by fakes (`testViewModel`, `FakeYouTube`) — no test goes online. `YouTubeMetadataFormatTest` compares the prompts with the web app's source and fails when they differ.
 
 ### iOS Application (PurrfectBytesiOS/)
 
@@ -124,7 +128,7 @@ Generate once, concatenate N times (never re-generate): `/repeat-audio`, `/repea
 
 ### YouTube Integration & AI Metadata
 
-- **Metadata providers** (`youtube_metadata_service.py`): `gemini` (gemini-3.5-flash, default), `openai` (gpt-5.4-mini), `anthropic` (claude-sonnet-4-5-20250929). Unified "My Study Journal" prompt template; robust regex parsing (`_parse_response`) guarantees the format regardless of minor AI variance. Android has its own independent implementation (`YouTubeMetadataGenerator.kt`).
+- **Metadata providers** (`youtube_metadata_service.py`): `gemini` (gemini-3.5-flash, default), `openai` (gpt-5.4-mini), `anthropic` (claude-sonnet-4-5-20250929). Unified "My Study Journal" prompt template; robust regex parsing (`_parse_response`) guarantees the format regardless of minor AI variance. Android carries a copy of both prompts and ports of the parsers in `YouTubeMetadataFormat.kt` — when a prompt changes here, copy it there (an Android test fails until then).
 - **Title format**: `My Study Journal: [LANGUAGE] Sentence - "[TEXT]" | Reading & Pronunciation`, guaranteed ≤ 100 chars.
 - **OAuth2**: scope `https://www.googleapis.com/auth/youtube`, persistent token (`youtube_token.json`), endpoints `/youtube/auth-url` → `/oauth2callback` → `/youtube/auth-status`.
 - **Upload**: Education category (27), public/private/unlisted, optional playlist add, FFmpeg `faststart` optimization.
@@ -132,10 +136,20 @@ Generate once, concatenate N times (never re-generate): `/repeat-audio`, `/repea
 ### Android Application - MVVM + Hilt
 
 ```
-Compose UI (ui/screens/, ui/components/) → MainViewModel (StateFlow) → services/ → data/remote/PurrfectBytesApi.kt (Retrofit)
+Compose UI (ui/screens/, ui/components/) → MainViewModel (StateFlow) → services/
 ```
 
-Notable: the Android app is not a thin client — it has on-device implementations of several web features in `services/`: `EdgeTTSEngine.kt`, `VideoGeneratorService.kt`, `AnthropicService.kt`, `YouTubeAuthManager.kt`/`YouTubeMetadataGenerator.kt`/`YouTubeVideoUploader.kt`, and ML Kit text recognition (`TextRecognitionProcessor.kt`, incl. CJK) fed by CameraX (`CameraScreen.kt`) with clickable text overlays (`ui/components/`). DI modules in `di/AppModule.kt`.
+The Android app never talks to the web server: the whole pipeline runs on the phone, in `services/`:
+
+- **What to render**: `RenderPlan.kt` turns the choices on screen into clips (speech that is generated once) and the order they are played in. `SpeedSequence.kt` and `Dialogue.kt` are ports of the web's `sequence_utils.py` and `dialogue_utils.py`; their tests hold values computed by the web's functions.
+- **Speech**: `TTSService.kt` → `EdgeTTSEngine.kt` (WebSocket connection, list of voices) + `EdgeTtsProtocol.kt` (message format, a port of the Python edge-tts library; holds the Edge version string that has to be bumped by hand when Microsoft starts answering 403), or the phone's own TTS engine. `EdgeVoiceCatalogue.kt` keeps the list of voices for a week; `SpeechCache.kt` (port of `tts_cache.py`) keeps generated speech.
+- **Timing**: `HighlightTiming.kt` — port of the web's `audio_timing.py` (word timestamps interpolated to characters, uniform fallback), but one highlighted character at a time and no lead/overlap.
+- **Rendering**: `FrameRenderer.kt` lays text out with `StaticLayout` (so CJK wrapping, Arabic shaping and right-to-left all come from Android), one picture per highlight position; conversations begin at the side, slow speech gets the "SLOW" badge. `VideoGeneratorService.kt` encodes one clip per piece of speech with FFmpegKit (an ffconcat list of pictures with durations), then joins the clips in playing order by stream copy.
+- **OCR**: `TextRecognitionProcessor.kt` (ML Kit, five scripts, run in parallel in Auto mode) fed by CameraX (`ui/screens/CameraScreen.kt`) or the photo picker; `ui/components/PrecisePhotoTextOverlay.kt` draws the tappable boxes.
+- **YouTube**: `YouTubeAuthManager.kt` (AppAuth/PKCE), `YouTubeAccountService.kt` (channels, playlists), `YouTubeVideoUploader.kt`, `YouTubeMetadataGenerator.kt` + `AnthropicService.kt` (title and description, and the list of items to review), `SourceStore.kt` (saved credit lines, same file format as the web's).
+- **Housekeeping**: `MediaStorage.kt` (working files live in the cache and are cleaned up), `VideoLibrary.kt` (the last five videos are kept), `AppSettings.kt`.
+
+Services are built by Hilt from their `@Inject` constructors; `di/AppModule.kt` only provides the Retrofit client for Claude. Classes that are converted to/from JSON by reflection must be kept in `app/proguard-rules.pro`, or the release build sends empty requests.
 
 ### iOS Application - MVVM
 

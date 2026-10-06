@@ -1,246 +1,164 @@
 package com.purrfectbytes.android.services
 
+import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
+import com.google.gson.JsonParser
 import com.purrfectbytes.android.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import kotlinx.coroutines.withTimeoutOrNull
+import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** The title and description could not be written; the message says why. */
+class MetadataException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
 @Singleton
-class YouTubeMetadataGenerator @Inject constructor(
-    private val anthropicService: AnthropicService
+class YouTubeMetadataGenerator internal constructor(
+    private val anthropicService: AnthropicService,
+    private val geminiApiKey: String,
+    private val anthropicApiKey: String,
+    /** Sends a prompt to Gemini and returns the answer. Replaced in tests. */
+    private val askGemini: (suspend (String) -> String?)? = null
 ) {
 
-    companion object {
-        private const val YOUTUBE_PROMPT_TEMPLATE = """STRICT OPERATING MODE: Generate the requested content and immediately stop. Do not include any conversational filler, follow-up suggestions, or questions. Any text following the hashtags is a violation of this instruction.
-
-You are a YouTube content creator helping generate titles and descriptions for language learning videos. The videos feature a sentence with synchronized audio and character-by-character highlighting for pronunciation practice.
-
-IMPORTANT RULES:
-
-ALL explanations, descriptions, breakdowns, and grammar points MUST be written in English, regardless of the target sentence language.
-
-NEVER ask follow-up questions - generate the complete output immediately based on the given sentence.
-
-Use SINGLE asterisks (text) for bold formatting, never double asterisks.
-
-Identify the language automatically.
-
-CRITICAL: Keep the title under 100 characters (strict limit).
-
-Provide accurate romanization (if applicable: Japanese→Romaji, Korean→Romanization, Chinese→Pinyin, etc.).
-
-TRANSLATION RULE: If the target sentence is NOT English, you MUST include the "English Translation" section. If the target sentence IS English, you MUST DELETE the "English Translation" section entirely.
-
-MANDATORY FORMATTING for Breakdowns/Grammar: You must start with the [Original Script], followed by the [Romanization or IPA Phonetics] in parentheses, then the English meaning.
-
-Example for English Breakdown: Word (IPA Phonetics) = English Meaning.
-
-Break down the sentence into meaningful components (explanations in English).
-
-Highlight 2-4 key grammar points (explanations in English).
-
-Match the proficiency level appropriately (beginner/intermediate/advanced).
-
-Use natural, encouraging tone.
-
-Include relevant hashtags for the specific language.
-
-Terminate the response immediately after the final hashtag. Do not include any text, sign-offs, or questions after the hashtags.
-
-Given a target sentence, generate:
-
-TITLE (following this format - MUST be under 100 characters, but don't output TITLE):
-
-My Study Journal: [LANGUAGE] Sentence - "[TARGET_SENTENCE]" | Reading & Pronunciation
-
-DESCRIPTION with these sections (don't output DESCRIPTION):
-
-📚 Study Journal Entry
-
-[Brief intro about learning this sentence today - MUST be in English]
-
-📝 Today's Sentence:
-
-[TARGET_SENTENCE in original language]
-
-([Romanization/IPA if applicable])
-
-📖 English Translation:[ONLY include this section if the target language is NOT English. If English, remove this entire section]
-
-"[Translation in English]"
-
-🔤 Breakdown:
-
-• [Original Script] ([Romanization/IPA]) = [Meaning in English]
-
-• [Original Script] ([Romanization/IPA]) = [Meaning in English]
-
-📚 Grammar Points:
-
-• [Original Script] ([Romanization/IPA]) - [Explanation in English]
-
-• [Original Script] ([Romanization/IPA]) - [Explanation in English]
-
-🎯 Perfect for:
-
-• [Proficiency level] learners
-
-• [Learning goal 1]
-
-• [Learning goal 2]
-
-💡 Study Tip:
-
-[Helpful context or usage note about this sentence - in English]
-
-📌 Credit:
-
-This sentence is sourced from another creator's content. All credit goes to the original author.
-
-👍 Enjoyed this study session? Please give it a thumbs up!
-
-🔔 Subscribe to follow my language learning journey and practice together!
-
-☕ Want to support more learning content? Scan the QR code (bottom-left corner)—my cat thanks you! 😺
-
-#[LanguageLearning] #[NativeLanguageName] #Learn[Language] #[Language]Language #[NativeStudyHashtag] #[ProficiencyTest] #[Language]Practice #Study[Language] #[Language]Grammar #LanguageLearning
-
-Final Output Check: Ensure the last sentence of the response is not a question.
-
-TARGET SENTENCE: {sentence}"""
-    }
-
-    private val generativeModel = GenerativeModel(
-        modelName = "gemini-3.5-flash",
-        apiKey = BuildConfig.GEMINI_API_KEY
+    @Inject
+    constructor(anthropicService: AnthropicService) : this(
+        anthropicService = anthropicService,
+        geminiApiKey = BuildConfig.GEMINI_API_KEY,
+        anthropicApiKey = BuildConfig.ANTHROPIC_API_KEY
     )
 
-    suspend fun generateMetadata(text: String, provider: String = "gemini"): Pair<String, String> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val prompt = YOUTUBE_PROMPT_TEMPLATE.replace("{sentence}", text)
+    companion object {
+        private const val TAG = "YouTubeMetadata"
+        const val PROVIDER_GEMINI = "gemini"
+        const val PROVIDER_ANTHROPIC = "anthropic"
 
-                val responseText = if (provider == "anthropic") {
+        private const val GEMINI_MODEL = "gemini-3.5-flash"
+        private const val ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
+
+        /** A full description takes a model well under a minute; this only stops a request that hangs. */
+        private const val TIMEOUT_MILLIS = 120_000L
+    }
+
+    private val generativeModel by lazy {
+        GenerativeModel(
+            modelName = GEMINI_MODEL,
+            apiKey = geminiApiKey
+        )
+    }
+
+    /**
+     * Writes a title and a description for a video of [text].
+     *
+     * With [items], the sections that explain the sentence hold exactly those words and
+     * grammar points: the ones the user kept of what [extractItems] found. [credit] names
+     * the source of the text; it is put into the description word for word, in place of
+     * the general credit the model writes.
+     *
+     * Throws [MetadataException] when that fails, so a failure can never be mistaken
+     * for a title.
+     */
+    suspend fun generateMetadata(
+        text: String,
+        provider: String = PROVIDER_GEMINI,
+        credit: String? = null,
+        items: List<StudyItem>? = null
+    ): Pair<String, String> {
+        return withContext(Dispatchers.IO) {
+            val responseText = ask(YouTubeMetadataFormat.prompt(text, items), provider)
+
+            val (title, description) = YouTubeMetadataFormat.parse(responseText, text)
+            if (title.isBlank() || description.isBlank()) {
+                throw MetadataException("${nameOf(provider)} answered, but without a title and a description")
+            }
+            title to if (credit.isNullOrBlank()) description else YouTubeMetadataFormat.applyCredit(description, credit)
+        }
+    }
+
+    /**
+     * Finds the words and grammar points of [text] that a learner may want explained,
+     * for the user to choose from. Throws [MetadataException] when that fails.
+     */
+    suspend fun extractItems(text: String, provider: String = PROVIDER_GEMINI): List<StudyItem> {
+        return withContext(Dispatchers.IO) {
+            YouTubeMetadataFormat.parseItems(ask(YouTubeMetadataFormat.extractionPrompt(text), provider))
+        }
+    }
+
+    private fun nameOf(provider: String): String = if (provider == PROVIDER_ANTHROPIC) "Claude" else "Gemini"
+
+    /** Sends [prompt] to the model of [provider] and returns what it answers. */
+    private suspend fun ask(prompt: String, provider: String): String {
+        val providerName = nameOf(provider)
+        return try {
+            withTimeoutOrNull(TIMEOUT_MILLIS) {
+                if (provider == PROVIDER_ANTHROPIC) {
                     generateAnthropicMetadata(prompt)
                 } else {
                     generateGeminiMetadata(prompt)
                 }
-                
-                parseResponse(responseText, text)
-            } catch (e: Exception) {
-                Pair("Error Generated Title", "Could not generate description: ${e.message}")
-            }
-        }
-    }
-
-    private fun parseResponse(rawText: String, originalText: String): Pair<String, String> {
-        val lines = rawText.trim().split("\n")
-        
-        // Find first non-empty line as potential title
-        var rawTitle = ""
-        var descriptionStart = 0
-        for (i in lines.indices) {
-            val stripped = lines[i].trim()
-            if (stripped.isNotEmpty()) {
-                rawTitle = stripped
-                descriptionStart = i + 1
-                break
-            }
-        }
-
-        // Rest is description
-        val descriptionLines = if (descriptionStart < lines.size) {
-            lines.subList(descriptionStart, lines.size)
-        } else {
-            emptyList()
-        }
-        val description = descriptionLines.joinToString("\n").trim()
-
-        // Clean up title (remove TITLE: prefix, markdown, etc.)
-        var cleanTitle = rawTitle
-        for (prefix in listOf("TITLE:", "Title:", "title:")) {
-            if (cleanTitle.startsWith(prefix, ignoreCase = true)) {
-                cleanTitle = cleanTitle.substring(prefix.length).trim()
-            }
-        }
-        cleanTitle = cleanTitle.trim().removeSurrounding("**").removeSurrounding("\"").trim()
-
-        // Attempt to reconstruct/standardize title
-        var language = "Language"
-        // FIXED: Added missing colon to regex
-        val langPattern = java.util.regex.Pattern.compile("My Study Journal:\\s*([a-zA-Z\\s]+?)(?:\\s*Sentence)?\\s*-", java.util.regex.Pattern.CASE_INSENSITIVE)
-        val langMatcher = langPattern.matcher(cleanTitle)
-        val foundLanguage = if (langMatcher.find()) {
-            var lang = langMatcher.group(1)?.trim() ?: "Language"
-            if (lang.lowercase().endsWith(" sentence")) {
-                lang = lang.substring(0, lang.length - 9).trim()
-            }
-            lang
-        } else null
-
-        var foundSentence: String? = null
-        val sentencePattern = java.util.regex.Pattern.compile("\"(.*?)\"")
-        val sentenceMatcher = sentencePattern.matcher(cleanTitle)
-        if (sentenceMatcher.find()) {
-            foundSentence = sentenceMatcher.group(1)?.trim()
-        } else {
-            val fallbackPattern = java.util.regex.Pattern.compile("-\\s*(.*?)\\s*\\|")
-            val fallbackMatcher = fallbackPattern.matcher(cleanTitle)
-            if (fallbackMatcher.find()) {
-                foundSentence = fallbackMatcher.group(1)?.trim()
-            }
-        }
-
-        // If we found both, reconstruct to enforce format and 100-char limit
-        return if (foundLanguage != null || foundSentence != null) {
-            val languageToUse = foundLanguage ?: "Language"
-            val sentenceToUse = foundSentence ?: originalText.take(50)
-            
-            val prefix = "My Study Journal: $languageToUse Sentence - \""
-            val suffix = "\" | Reading & Pronunciation"
-            
-            val finalTitle = if (prefix.length + sentenceToUse.length + suffix.length > 100) {
-                val allowedLen = 100 - prefix.length - suffix.length - 3
-                if (allowedLen > 0) {
-                    prefix + sentenceToUse.take(allowedLen).trim() + "..." + suffix
-                } else {
-                    (prefix + sentenceToUse + suffix).take(97) + "..."
-                }
-            } else {
-                prefix + sentenceToUse + suffix
-            }
-            Pair(finalTitle, description)
-        } else {
-            // Fallback: If cleanTitle already looks like our format, use it, else just use it as-is
-            // But make sure it's not the start of the description
-            val finalTitle = if (cleanTitle.length > 100) cleanTitle.take(97) + "..." else cleanTitle
-            Pair(finalTitle, description)
+            } ?: throw MetadataException("$providerName did not answer within ${TIMEOUT_MILLIS / 1000} seconds")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: MetadataException) {
+            throw e
+        } catch (e: HttpException) {
+            Log.e(TAG, "$providerName refused the request", e)
+            throw MetadataException("$providerName answered with an error: ${describe(e)}", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "$providerName request failed", e)
+            throw MetadataException("$providerName could not be reached: ${e.message ?: e.javaClass.simpleName}", e)
         }
     }
 
     private suspend fun generateGeminiMetadata(prompt: String): String {
-        val response = generativeModel.generateContent(
-            content {
-                text(prompt)
-            }
-        )
-        return response.text ?: throw Exception("Empty response from Gemini")
+        if (geminiApiKey.isBlank()) throw missingKey("GEMINI_API_KEY")
+
+        val answer = if (askGemini != null) {
+            askGemini.invoke(prompt)
+        } else {
+            generativeModel.generateContent(
+                content {
+                    text(prompt)
+                }
+            ).text
+        }
+        return answer?.takeIf { it.isNotBlank() }
+            ?: throw MetadataException("Gemini sent an empty answer")
     }
 
     private suspend fun generateAnthropicMetadata(prompt: String): String {
+        if (anthropicApiKey.isBlank()) throw missingKey("ANTHROPIC_API_KEY")
+
         val request = AnthropicRequest(
-            model = "claude-sonnet-4-5-20250929",
+            model = ANTHROPIC_MODEL,
             maxTokens = 2048,
             messages = listOf(AnthropicMessage(role = "user", content = prompt))
         )
         val response = anthropicService.generateMessage(
-            apiKey = BuildConfig.ANTHROPIC_API_KEY,
+            apiKey = anthropicApiKey,
             request = request
         )
-        return response.content.firstOrNull()?.text ?: throw Exception("Empty response from Anthropic")
+        return response.content?.firstOrNull { it.type == "text" }?.text?.takeIf { it.isNotBlank() }
+            ?: throw MetadataException("Claude sent an empty answer")
+    }
+
+    private fun missingKey(name: String) = MetadataException(
+        "This build has no $name. Add it to local.properties and build the app again."
+    )
+
+    /** The error in the service's own words, e.g. "invalid x-api-key", with the HTTP status. */
+    private fun describe(e: HttpException): String {
+        val detail = try {
+            e.response()?.errorBody()?.string()
+                ?.let { JsonParser.parseString(it).asJsonObject.getAsJsonObject("error").get("message").asString }
+        } catch (parsing: Exception) {
+            null
+        }
+        return if (detail.isNullOrBlank()) "HTTP ${e.code()}" else "$detail (HTTP ${e.code()})"
     }
 }
