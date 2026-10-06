@@ -193,25 +193,6 @@
                 <div id="providerStatus" class="status-line"></div>
             </div>
 
-            <div class="form-group">
-                <label for="sourceSelect">Text source (for the credit line):</label>
-                <div class="field-row">
-                    <select id="sourceSelect" class="field-grow">
-                        <option value="">— Generic credit —</option>
-                    </select>
-                    <button type="button" id="addSourceBtn" class="inline-btn">+ New</button>
-                    <button type="button" id="deleteSourceBtn" class="inline-btn">🗑 Delete</button>
-                </div>
-                <small class="hint">The saved credit line replaces the generic "another creator's content" credit</small>
-            </div>
-
-            <div id="sourceForm" class="form-group source-form" style="display: none;">
-                <input type="text" id="sourceName" placeholder="Source name (e.g. Shin Kanzen Master N1)">
-                <textarea id="sourceCredit" rows="2"
-                    placeholder="Exact credit line, e.g. This sentence comes from the textbook 新完全マスター N1 by 3A Corporation."></textarea>
-                <button type="button" id="saveSourceBtn" class="inline-btn">💾 Save source</button>
-            </div>
-
             <button type="button" id="extractItemsBtn" class="youtube-btn">
                 <span class="button-text">🔍 Extract Vocabulary & Grammar (review before generating)</span>
                 <div class="spinner"></div>
@@ -231,6 +212,25 @@
                     <div class="items-subheading">📚 Grammar Points</div>
                     <div id="itemsGrammarList" class="items-checklist"></div>
                 </div>
+            </div>
+
+            <div class="form-group">
+                <label for="sourceSelect">Text source (for the credit line):</label>
+                <div class="field-row">
+                    <select id="sourceSelect" class="field-grow">
+                        <option value="">— Generic credit —</option>
+                    </select>
+                    <button type="button" id="addSourceBtn" class="inline-btn">+ New</button>
+                    <button type="button" id="deleteSourceBtn" class="inline-btn">🗑 Delete</button>
+                </div>
+                <small class="hint">The saved credit line replaces the generic "another creator's content" credit</small>
+            </div>
+
+            <div id="sourceForm" class="form-group source-form" style="display: none;">
+                <input type="text" id="sourceName" placeholder="Source name (e.g. Shin Kanzen Master N1)">
+                <textarea id="sourceCredit" rows="2"
+                    placeholder="Exact credit line, e.g. This sentence comes from the textbook 新完全マスター N1 by 3A Corporation."></textarea>
+                <button type="button" id="saveSourceBtn" class="inline-btn">💾 Save source</button>
             </div>
 
             <button type="button" id="generateMetadataBtn" class="youtube-btn">

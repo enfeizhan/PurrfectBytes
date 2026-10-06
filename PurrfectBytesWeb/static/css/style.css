@@ -425,6 +425,11 @@ textarea.description-content {
     line-height: 1.5;
 }
 
+/* The text source row follows the review items */
+#itemsCard {
+    margin-bottom: 20px;
+}
+
 .items-subheading {
     font-weight: 600;
     color: #555;
