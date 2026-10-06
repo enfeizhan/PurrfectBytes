@@ -52,10 +52,16 @@ ENGINE_INFO: Dict[str, Dict[str, str]] = {
 
 class BaseTTSEngine(ABC):
     """Abstract base class for TTS engines."""
-    
+
+    # Prepended to generated filenames so output says which engine made it.
+    FILENAME_PREFIX = ""
+
     def __init__(self, audio_dir: Path, audio_format: str = "mp3"):
         self.audio_dir = audio_dir
+        # What the engine writes while working, and what it hands back. These
+        # differ for Piper, which synthesizes WAV and converts to MP3.
         self.audio_format = audio_format
+        self.output_format = audio_format
     
     @abstractmethod
     def generate(
@@ -95,6 +101,18 @@ class BaseTTSEngine(ABC):
 
         slug = f"{filename_slug(text)}_" if text else ""
         return f"{prefix}{slug}{uuid.uuid4().hex[:8]}.{self.audio_format}"
+
+    def new_audio_path(self, text: str = "") -> Path:
+        """An unused path for this engine's working output, in its own format."""
+        return self.audio_dir / self._generate_filename(self.FILENAME_PREFIX, text)
+
+    def new_output_path(self, text: str = "") -> Path:
+        """An unused path for this engine's finished audio, as callers receive it.
+
+        Public because a cache hit has to land somewhere named exactly as a
+        miss would be, and only the engine knows its own naming.
+        """
+        return self.new_audio_path(text).with_suffix(f".{self.output_format}")
     
     def _get_duration(self, audio_path: Path) -> float:
         """Get audio duration in seconds."""
@@ -103,6 +121,8 @@ class BaseTTSEngine(ABC):
 
 class GTTSEngine(BaseTTSEngine):
     """Google Text-to-Speech engine using gTTS library."""
+
+    FILENAME_PREFIX = "gtts_"
     
     def generate(
         self,
@@ -113,8 +133,8 @@ class GTTSEngine(BaseTTSEngine):
     ) -> Tuple[Path, float]:
         from gtts import gTTS
         
-        audio_filename = self._generate_filename("gtts_", text)
-        audio_path = self.audio_dir / audio_filename
+        audio_path = self.new_audio_path(text)
+        audio_filename = audio_path.name
         
         try:
             tts = gTTS(text=text, lang=language, slow=slow)
@@ -141,6 +161,8 @@ class GTTSEngine(BaseTTSEngine):
 
 class EdgeTTSEngine(BaseTTSEngine):
     """Microsoft Edge TTS engine using edge-tts library."""
+
+    FILENAME_PREFIX = "edge_"
     
     # Default voices for common languages
     DEFAULT_VOICES = {
@@ -237,8 +259,8 @@ class EdgeTTSEngine(BaseTTSEngine):
         # Adjust rate for slow speech
         rate = "-20%" if slow else "+0%"
         
-        audio_filename = self._generate_filename("edge_", text)
-        audio_path = self.audio_dir / audio_filename
+        audio_path = self.new_audio_path(text)
+        audio_filename = audio_path.name
         
         try:
             # Stream synthesis so we can capture WordBoundary events — real
@@ -315,6 +337,8 @@ class EdgeTTSEngine(BaseTTSEngine):
 
 class PiperTTSEngine(BaseTTSEngine):
     """Piper TTS engine for offline neural TTS."""
+
+    FILENAME_PREFIX = "piper_"
     
     # Default models for common languages
     DEFAULT_MODELS = {
@@ -429,8 +453,8 @@ class PiperTTSEngine(BaseTTSEngine):
                 f"Download models from https://huggingface.co/rhasspy/piper-voices and place .onnx files in ~/.local/share/piper-voices/"
             )
         
-        audio_filename = self._generate_filename("piper_", text)
-        audio_path = self.audio_dir / audio_filename
+        audio_path = self.new_audio_path(text)
+        audio_filename = audio_path.name
         
         try:
             # Piper reads from stdin and outputs to file

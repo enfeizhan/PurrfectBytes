@@ -1,5 +1,13 @@
 """Test configuration and fixtures."""
 
+import os
+
+# Before anything imports src.config.settings, which reads this once: tests get
+# no reusable speech. A cache hit would let audio from an earlier run satisfy a
+# request, so a genuinely broken TTS engine would still pass. Tests that want
+# the cache build a TTSCache themselves or re-enable it on their service.
+os.environ["TTS_CACHE"] = "false"
+
 import pytest
 import tempfile
 import shutil

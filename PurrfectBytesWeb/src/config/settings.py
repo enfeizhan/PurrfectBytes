@@ -70,6 +70,16 @@ VIDEO_CONFIG = {
     "line_height": 70,  # Distance between text lines
 }
 
+# Synthesized speech is reused across renders - see services/tts_cache.py.
+# The cache is a subdirectory of AUDIO_DIR rather than its own path, so it is
+# flushed on reboot with the rest of /tmp and skipped by the file cleanup,
+# which does not recurse. Set TTS_CACHE=false to always synthesize afresh.
+TTS_CACHE_CONFIG = {
+    "enabled": os.getenv("TTS_CACHE", "true").lower() not in ("false", "0", "no"),
+    "dir_name": "tts_cache",
+    "max_entries": 500,
+}
+
 # Audio settings
 AUDIO_CONFIG = {
     "format": "mp3",
@@ -179,6 +189,7 @@ def get_config() -> Dict[str, Any]:
         "saved_sources_file": SAVED_SOURCES_FILE,
         "video": VIDEO_CONFIG,
         "audio": AUDIO_CONFIG,
+        "tts_cache": TTS_CACHE_CONFIG,
         "fonts": FONT_CONFIG,
         "languages": LANGUAGE_CONFIG,
         "supported_languages": SUPPORTED_LANGUAGES,

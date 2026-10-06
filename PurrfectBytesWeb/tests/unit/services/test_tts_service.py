@@ -6,7 +6,11 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.services.audio_timing import compute_character_timings, word_boundaries_path
+from src.services.audio_timing import (
+    compute_character_timings,
+    save_word_boundaries,
+    word_boundaries_path,
+)
 from src.services.tts_service import TTSService
 from src.models.schemas import CharacterTiming
 
@@ -304,3 +308,125 @@ class TestTTSService:
         assert not old_file.exists()
         assert not old_sidecar.exists()
         assert new_file.exists()
+
+
+class TestGenerateAudioCaching:
+    """generate_audio reuses speech it has already synthesized."""
+
+    @pytest.fixture
+    def cached_service(self, tts_service):
+        """The service with its cache on - the suite runs with it off."""
+        tts_service.cache.enabled = True
+        return tts_service
+
+    @pytest.fixture
+    def synthesis(self, cached_service, mocker):
+        """Count synthesis calls, writing a real file each time like the engine does."""
+        from src.services.tts_engines import TTSEngine, TTSEngineFactory
+
+        engine = TTSEngineFactory.get_engine(TTSEngine.GTTS, cached_service.audio_dir, "mp3")
+        calls = []
+
+        def fake_generate(text, language="en", slow=False, voice=None):
+            path = engine.new_output_path(text)
+            path.write_bytes(f"AUDIO:{text}|{language}|{slow}|{voice}".encode())
+            save_word_boundaries(path, [{"word": text.split()[0], "start": 0.0, "end": 0.4}])
+            calls.append((text, language, slow, voice))
+            return path, 2.5
+
+        mocker.patch.object(engine, "generate", side_effect=fake_generate)
+        return calls
+
+    def test_same_request_twice_synthesizes_once(self, cached_service, synthesis, sample_text):
+        from src.services.tts_engines import TTSEngine
+
+        first_path, first_duration = cached_service.generate_audio(
+            sample_text, "en", False, engine=TTSEngine.GTTS
+        )
+        second_path, second_duration = cached_service.generate_audio(
+            sample_text, "en", False, engine=TTSEngine.GTTS
+        )
+
+        assert len(synthesis) == 1
+        assert second_duration == first_duration == 2.5
+        # A copy of its own, not the same file handed out twice
+        assert second_path != first_path
+        assert second_path.read_bytes() == first_path.read_bytes()
+
+    def test_cached_audio_is_named_like_generated_audio(self, cached_service, synthesis, sample_text):
+        from src.services.tts_engines import TTSEngine
+
+        first_path, _ = cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+        second_path, _ = cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+
+        assert second_path.parent == first_path.parent
+        assert second_path.name.startswith("gtts_")
+        assert second_path.suffix == first_path.suffix
+
+    def test_word_timings_come_back_too(self, cached_service, synthesis, sample_text):
+        """Without the sidecar, highlighting silently falls back to uniform spacing."""
+        from src.services.tts_engines import TTSEngine
+
+        first_path, _ = cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+        expected = json.loads(word_boundaries_path(first_path).read_text())
+
+        second_path, _ = cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+
+        assert json.loads(word_boundaries_path(second_path).read_text()) == expected
+
+    def test_deleting_the_returned_file_keeps_the_entry(self, cached_service, synthesis, sample_text):
+        """Callers such as generate_conversation delete what they are given."""
+        from src.services.tts_engines import TTSEngine
+
+        first_path, _ = cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+        first_path.unlink()
+        word_boundaries_path(first_path).unlink()
+
+        second_path, duration = cached_service.generate_audio(
+            sample_text, "en", False, engine=TTSEngine.GTTS
+        )
+
+        assert len(synthesis) == 1
+        assert duration == 2.5
+        assert second_path.exists()
+
+    @pytest.mark.parametrize("changed", [
+        {"language": "ja"},
+        {"slow": True},
+        {"voice": "other-voice"},
+        {"text": "Something else entirely."},
+    ])
+    def test_a_different_request_is_synthesized_afresh(self, cached_service, synthesis, sample_text, changed):
+        from src.services.tts_engines import TTSEngine
+
+        request = dict(text=sample_text, language="en", slow=False, voice="a-voice")
+        cached_service.generate_audio(engine=TTSEngine.GTTS, **request)
+        cached_service.generate_audio(engine=TTSEngine.GTTS, **{**request, **changed})
+
+        assert len(synthesis) == 2
+
+    def test_cache_off_synthesizes_every_time(self, cached_service, synthesis, sample_text):
+        from src.services.tts_engines import TTSEngine
+
+        cached_service.cache.enabled = False
+        cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+        cached_service.generate_audio(sample_text, "en", False, engine=TTSEngine.GTTS)
+
+        assert len(synthesis) == 2
+
+    def test_a_repeated_conversation_line_is_synthesized_once(
+        self, cached_service, synthesis, audio_dir, mocker
+    ):
+        """The everyday payoff: a speaker saying the same thing twice."""
+        from src.services.tts_engines import TTSEngine
+        from src.utils.dialogue_utils import parse_dialogue
+
+        mocker.patch.object(cached_service, "concatenate_audio", return_value=audio_dir / "out.mp3")
+        dialogue = parse_dialogue("Good morning\nGood morning")
+
+        _, duration = cached_service.generate_conversation(
+            dialogue, engine=TTSEngine.GTTS, voices=("voiceA", "voiceA")
+        )
+
+        assert len(synthesis) == 1
+        assert duration == pytest.approx(2 * 2.5)

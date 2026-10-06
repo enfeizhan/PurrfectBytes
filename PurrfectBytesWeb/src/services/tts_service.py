@@ -7,7 +7,7 @@ from typing import Tuple, Optional, List
 from gtts import gTTS
 from pydub import AudioSegment
 
-from src.config.settings import AUDIO_DIR, AUDIO_CONFIG
+from src.config.settings import AUDIO_DIR, AUDIO_CONFIG, TTS_CACHE_CONFIG
 from src.utils.text_utils import clean_text_for_tts, filename_slug
 from src.models.schemas import AudioAnalysis
 from src.utils.audio_utils import get_audio_duration
@@ -18,6 +18,7 @@ from src.services.audio_timing import (
     LEAD_TIME,
     OVERLAP_DURATION,
 )
+from src.services.tts_cache import TTSCache
 from src.services.tts_engines import (
     TTSEngine,
     TTSEngineFactory,
@@ -40,6 +41,12 @@ class TTSService:
         self.audio_dir = AUDIO_DIR
         self.audio_config = AUDIO_CONFIG
         self.default_engine = default_engine
+        self.cache = TTSCache(
+            self.audio_dir / TTS_CACHE_CONFIG["dir_name"],
+            audio_format=self.audio_config["format"],
+            max_entries=TTS_CACHE_CONFIG["max_entries"],
+            enabled=TTS_CACHE_CONFIG["enabled"],
+        )
     
     def generate_audio(
         self, 
@@ -83,6 +90,7 @@ class TTSService:
             )
             
             # Check if engine is available
+            active_engine = selected_engine
             if not tts_engine.is_available():
                 logger.warning(f"Engine {selected_engine.value} not available, falling back to gTTS")
                 tts_engine = TTSEngineFactory.get_engine(
@@ -90,7 +98,23 @@ class TTSService:
                     self.audio_dir,
                     self.audio_config['format']
                 )
-            
+                active_engine = TTSEngine.GTTS
+
+            # Speech for this text in this voice may already exist from an
+            # earlier render. Reuse it as a copy the caller owns outright -
+            # several callers delete what they are given.
+            cache_key = self.cache.key(
+                text=clean_text,
+                language=language,
+                slow=slow,
+                engine=active_engine.value,
+                voice=voice,
+            )
+            destination = tts_engine.new_output_path(clean_text)
+            cached_duration = self.cache.fetch(cache_key, destination)
+            if cached_duration is not None:
+                return destination, cached_duration
+
             # Generate audio using the selected engine
             audio_path, duration = tts_engine.generate(
                 text=clean_text,
@@ -98,8 +122,10 @@ class TTSService:
                 slow=slow,
                 voice=voice
             )
-            
-            logger.info(f"Audio generated with {selected_engine.value}: {audio_path.name} ({duration:.2f}s)")
+
+            self.cache.store(cache_key, audio_path, duration)
+
+            logger.info(f"Audio generated with {active_engine.value}: {audio_path.name} ({duration:.2f}s)")
             return audio_path, duration
             
         except Exception as e:
